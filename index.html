@@ -1,0 +1,1323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APIM Migration Walkthrough</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #182032;
+    --panel-2: #1e2840;
+    --line: #2f3b57;
+    --text: #e6ebf5;
+    --muted: #8d99b3;
+    --old: #ff7a1a;      /* source APIM */
+    --new: #3ba7ff;      /* target APIM */
+    --db: #9b8cff;
+    --fresh: #f0abfc;    /* fresh, empty test databases */
+    --db-row: #4b4380;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --packet: #ffd166;
+    --backend: #2dd4bf;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 16px 16px 32px; }
+  [hidden] { display: none !important; }
+  .setup {
+    max-width: 640px; margin: 48px auto; padding: 28px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 16px;
+  }
+  .setup h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+  .setup > p { margin: 0 0 22px; color: var(--muted); }
+  .setup .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .setup label.field { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+  .setup select { width: 100%; padding: 9px 10px; }
+  .setup fieldset { border: 0; padding: 0; margin: 0 0 18px; }
+  .setup legend { font-size: 14px; color: var(--muted); margin-bottom: 8px; padding: 0; }
+  .setup .radio { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; cursor: pointer; }
+  .setup .radio input { accent-color: var(--new); width: 16px; height: 16px; position: relative; top: 2px; }
+  .setup .hint { display: block; color: var(--muted); font-size: 13px; }
+  .approach {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin: 0 0 20px; font-size: 14px; color: #c3cbe0;
+  }
+  .approach strong { color: var(--text); }
+  .approach.bad { border-color: var(--bad); }
+  .setup button.primary { padding: 10px 18px; font-size: 15px; }
+  .setup button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .chip {
+    display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 12px;
+    vertical-align: middle; background: #1b3152; border: 1px solid #36598f; color: var(--text); font-weight: 500;
+  }
+  .chip.alt { background: #2a2140; border-color: #5a4a8f; }
+  .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  @media (max-width: 640px) { .setup .row { grid-template-columns: 1fr; } .setup { margin: 16px auto; padding: 20px; } }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }
+  header h1 { font-size: 20px; margin: 0 0 2px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .modes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .modes button { border: 0; border-radius: 0; padding: 8px 14px; background: var(--panel); color: var(--muted); }
+  .modes button + button { border-left: 1px solid var(--line); }
+  .modes button.active { background: #1b3152; color: var(--text); }
+  .stage {
+    background: radial-gradient(ellipse at 50% 0%, #17203a 0%, var(--bg) 70%);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  }
+  svg { display: block; width: 100%; height: auto; }
+  .caption {
+    display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; align-items: baseline;
+    margin-top: 14px; min-height: 76px;
+  }
+  .caption .num { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .caption h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  .caption p { grid-column: 2; margin: 0; color: #c3cbe0; max-width: 860px; }
+  .caption code { white-space: nowrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  button, select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 12px; font: inherit; font-size: 14px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #4a5a80; }
+  button.primary { background: #26406b; border-color: #36598f; min-width: 92px; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .steps button { padding: 5px 10px; font-size: 13px; color: var(--muted); }
+  .steps button.active { color: var(--text); border-color: var(--new); background: #1b3152; }
+  @media (max-width: 640px) {
+    .caption { grid-template-columns: 1fr; }
+    .caption p { grid-column: 1; }
+    .steps { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section id="setup" class="setup" hidden>
+    <h1>Plan an API Manager migration</h1>
+    <p>Pick your versions and deployment to see how the migration works, step by step.</p>
+    <div class="row">
+      <label class="field">Current version (source)
+        <select id="selSrc"></select>
+      </label>
+      <label class="field">Target version
+        <select id="selTgt"></select>
+      </label>
+    </div>
+    <fieldset>
+      <legend>Deployment</legend>
+      <label class="radio"><input type="radio" name="dep" value="aio" checked> All-in-one</label>
+      <label class="radio"><input type="radio" name="dep" value="dist">
+        <span>Distributed
+          <span class="hint">Shown as a generalized pattern: Gateway, Control Plane and Traffic Manager.</span></span></label>
+    </fieldset>
+    <fieldset>
+      <legend>Target platform</legend>
+      <label class="radio"><input type="radio" name="plat" value="vm" checked> Virtual machines</label>
+      <label class="radio"><input type="radio" name="plat" value="k8s">
+        <span>Kubernetes
+          <span class="hint">Migration clients, if needed, run on a temporary VM that is removed afterwards.</span></span></label>
+    </fieldset>
+    <fieldset>
+      <legend>Can you take downtime during the migration?</legend>
+      <label class="radio"><input type="radio" name="downtime" value="yes"> Yes, a maintenance window is acceptable</label>
+      <label class="radio"><input type="radio" name="downtime" value="no" checked> No, APIs must stay available</label>
+    </fieldset>
+    <p class="approach" id="approach"></p>
+    <button id="btnGo" class="primary">Show the migration ▶</button>
+  </section>
+
+  <section id="player" hidden>
+  <header>
+    <div>
+      <h1><span id="title"></span><span class="chip" id="chip"></span><span class="chip alt" id="chipDep"></span><span class="chip alt" id="chipPlat"></span></h1>
+      <p id="subtitle"></p>
+    </div>
+    <div class="header-actions">
+      <div class="modes" role="group" aria-label="Downtime option">
+        <button data-mode="downtime">With downtime</button>
+        <button data-mode="freeze">Without downtime (freeze window)</button>
+      </div>
+      <button id="btnSetup" title="Pick other versions or deployment">Change setup</button>
+    </div>
+  </header>
+
+  <div class="stage"><svg id="svg" viewBox="0 0 1200 690" role="img" aria-label="APIM migration animation"></svg></div>
+
+  <div class="caption" aria-live="polite">
+    <span class="num" id="capNum"></span>
+    <h2 id="capTitle"></h2>
+    <p id="capText"></p>
+  </div>
+
+  <div class="controls">
+    <button id="btnRestart" title="Restart">⟲ Restart</button>
+    <button id="btnPrev" title="Previous step">◀ Prev</button>
+    <button id="btnPlay" class="primary">❚❚ Pause</button>
+    <button id="btnNext" title="Next step">Next ▶</button>
+    <select id="speed" title="Speed">
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+    <div class="steps" id="steps"></div>
+  </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+(() => {
+  // ---------- helpers ----------
+  const NS = 'http://www.w3.org/2000/svg';
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const C = {
+    panel: css('--panel'), line: css('--line'), text: css('--text'), muted: css('--muted'),
+    old: css('--old'), neu: css('--new'), db: css('--db'), dbRow: css('--db-row'), fresh: css('--fresh'),
+    ok: css('--ok'), warn: css('--warn'), bad: css('--bad'), packet: css('--packet'),
+    backend: css('--backend'), grey: '#5b6684',
+  };
+
+  // Chosen on the setup screen.
+  let SRC = '4.2.0';
+  let TARGET = '4.7.0';
+  let DEP = 'aio'; // 'aio' | 'dist'
+  const isDist = () => DEP === 'dist';
+  let PLAT = 'vm'; // target platform: 'vm' | 'k8s'
+  const isK8s = () => PLAT === 'k8s';
+  // Migration clients can't run inside the Kubernetes deployment, so they run on a temporary
+  // all-in-one VM connected to the copied databases. Script-only migrations don't need it.
+  const useTempVm = (scn) => isK8s() && scn === 'client';
+  // Two-step migrations always use a temporary 4.2.0 all-in-one node.
+  const useTempNode = (scn) => useTempVm(scn) || scn === 'twostep';
+
+  // Supported paths, from the WSO2 migration docs catalog:
+  //  - direct migration with migration clients: 3.2.0 / 4.0.0 / 4.1.0 -> 4.5.0 / 4.6.0 / 4.7.0
+  //  - zero-data migration (DB script only): 4.2.0 or later -> any later version from 4.3.0
+  //  - direct migration with migration clients to 4.2.0: any source up to 4.1.0
+  //  - two-step: 2.6.0 / 2.7.0 / 3.0.0 / 3.1.0 -> 4.3.0+ : migrate the data to 4.2.0 on a temporary
+  //    4.2.0 node (clients + scripts), then run the 4.2.0 -> target script
+  const TWO_STEP_SOURCES = ['2.6.0', '2.7.0', '3.0.0', '3.1.0'];
+  const VIA = '4.2.0';
+  const SOURCES = ['2.6.0', '2.7.0', '3.0.0', '3.1.0', '3.2.0', '4.0.0', '4.1.0', '4.2.0', '4.3.0', '4.4.0', '4.5.0', '4.6.0'];
+  const TARGETS = ['4.2.0', '4.3.0', '4.4.0', '4.5.0', '4.6.0', '4.7.0'];
+  const CLIENT_SOURCES = ['3.2.0', '4.0.0', '4.1.0'];
+  const CLIENT_TARGETS = ['4.5.0', '4.6.0', '4.7.0'];
+  const vcmp = (a, b) => {
+    const x = a.split('.').map(Number), y = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return 0;
+  };
+  function strategyFor(src, tgt) {
+    if (tgt === VIA) return vcmp(src, '4.1.0') <= 0 ? 'client' : null;
+    if (TWO_STEP_SOURCES.includes(src)) return TARGETS.includes(tgt) ? 'twostep' : null;
+    if (CLIENT_SOURCES.includes(src)) return CLIENT_TARGETS.includes(tgt) ? 'client' : null;
+    if (vcmp(src, '4.2.0') >= 0 && vcmp(tgt, src) > 0 && vcmp(tgt, '4.3.0') >= 0) return 'script';
+    return null;
+  }
+  // From 4.5.0 the Gateway in a distributed deployment does not need the databases.
+  const gwUsesDb = (v) => vcmp(v, '4.5.0') < 0;
+
+  function el(tag, attrs = {}, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function txt(parent, x, y, s, attrs = {}) {
+    const t = el('text', { x, y, fill: C.text, 'font-size': 14, ...attrs }, parent);
+    t.textContent = s;
+    return t;
+  }
+  function pill(parent, x, y, w, label, color) {
+    const g = el('g', {}, parent);
+    const r = el('rect', { x, y, width: w, height: 24, rx: 12, fill: color, 'fill-opacity': 0.15, stroke: color, 'stroke-opacity': 0.5 }, g);
+    const d = el('circle', { cx: x + 14, cy: y + 12, r: 4, fill: color }, g);
+    const t = txt(g, x + 26, y + 16.5, label, { 'font-size': 12, fill: color });
+    // set() lets the live status panel change a pill without the timeline.
+    g.set = (label2, color2) => {
+      t.textContent = label2;
+      [r, d].forEach((e) => { e.setAttribute('fill', color2); });
+      r.setAttribute('stroke', color2);
+      t.setAttribute('fill', color2);
+    };
+    return g;
+  }
+
+  const svg = document.getElementById('svg');
+
+  // ---------- scenarios, modes and steps ----------
+  // Each scenario shares the opening steps (running, build, stop/freeze, copy) and
+  // the final steps (start, switch); only the migration steps in between differ.
+  const MODE_TEXT = {
+    downtime: {
+      subtitle: (src) => `Stop ${src}, migrate, then start on ${TARGET}. APIs are unavailable during the maintenance window.`,
+      hold: (src) => ({ label: 'stop', title: `Stop ${src} (downtime starts)`,
+        text: `The maintenance window begins. The load balancer / DNS stops accepting new API calls, calls already in progress finish, and ${isDist() ? `all ${src} nodes are` : `${src} is`} shut down. From now until the switch, the APIs are unavailable.` }),
+      copy: (src) => `Both ${src} databases are backed up and the copies are restored for ${TARGET}. Nothing is writing to them, so the copy is complete. The originals stay unchanged.`,
+      switch: (src) => ({ label: 'switch', title: 'Switch traffic (downtime ends)',
+        text: `The load balancer / DNS sends API calls to ${TARGET}, which forwards them to the same backend services. ${src} and its databases are kept as they were, so you can roll back.` }),
+    },
+    freeze: {
+      subtitle: (src) => `Keep ${src} serving API calls while changes are frozen. No outage; only changes are paused.`,
+      hold: (src) => ({ label: 'freeze', title: 'Start the freeze window',
+        text: `Changes are paused: no new or edited APIs, applications or subscriptions in the Publisher, Developer Portal or Admin Portal. API calls keep flowing through ${src} to the backend, so API consumers notice nothing.` }),
+      copy: (src) => `Both ${src} databases are backed up and the copies are restored for ${TARGET}, while ${src} keeps serving API calls. Because changes are frozen, the copy matches production.`,
+      switch: (src) => ({ label: 'switch', title: 'Switch traffic and end the freeze',
+        text: `The load balancer / DNS moves API calls to ${TARGET} without an outage. Changes are allowed again, now on ${TARGET}. ${src} stays on standby for rollback.` }),
+    },
+  };
+
+  // Where migration clients run: the all-in-one node, or the Control Plane in a
+  // distributed deployment (it is the node connected to all the databases).
+  const migNode = (scn) => useTempVm(scn) ? 'the temporary VM'
+    : isDist() ? `the ${TARGET} Control Plane (the node connected to all the databases)` : `the ${TARGET} node`;
+  const migNodeShort = (scn) => useTempVm(scn) ? 'the temporary VM' : isDist() ? 'the Control Plane' : TARGET;
+
+  const SCENARIOS = {
+    script: {
+      name: 'Zero-data migration',
+      summary: () => `Copy both databases, then run one SQL script on APIM_DB. SHARED_DB needs no changes.`,
+      sharedAfter: () => `ready for ${TARGET}`, // no SHARED_DB script in zero-data migrations
+      steps: (src) => [
+        { label: 'migrate', title: 'Run the migration script',
+          text: `The ${src} → ${TARGET} migration SQL script runs against the copied APIM_DB. It updates the schema and some data so that ${TARGET} can use it. SHARED_DB needs no changes for this upgrade.` },
+      ],
+      timeline: (tl, s) => {
+        tl.addLabel('migrate');
+        flyDoc(tl, s.sqlDoc, 810);
+        dbUpdate(tl, s.dbTgtA, { rows: [0, 2], add: true, swap: true });
+        tl.to(s.dbTgtS.schemaA, { opacity: 0, duration: 0.3 }, '<');
+        tl.to(s.dbTgtS.schemaB, { opacity: 1, duration: 0.3 }, '<0.15');
+        wait(tl);
+      },
+    },
+    client: {
+      name: 'Direct migration with migration clients',
+      summary: () => `Copy both databases, run a SQL script on SHARED_DB, then run two migration clients (identity, then API Manager) that update both databases.`,
+      sharedAfter: () => `schema ${TARGET}`,
+      steps: (src) => [
+        { label: 'sql', title: 'Run the database script',
+          text: `A SQL script prepares the copied SHARED_DB (the registry database) for ${TARGET}.` },
+        ...(useTempVm('client') ? [{ label: 'tempvm', title: 'Create a temporary VM',
+          text: `The target runs on Kubernetes, so the migration clients run on a temporary VM: an all-in-one APIM ${TARGET} node connected to the copied databases.${isDist() ? ' An all-in-one node is enough here, even though the target deployment is distributed.' : ''} The Kubernetes deployment is not started yet.` }] : []),
+        { label: 'identity', title: 'Migrate identity data',
+          text: `The identity migration client (a JAR file) is copied into ${migNode('client')}, which is started once in migration mode with <code>-Dmigrate -Dcomponent=identity</code>. It updates the identity data in both databases. The JAR is then removed.` },
+        { label: 'apimig', title: 'Migrate API Manager data',
+          text: `Next, the API Manager migration client (another JAR file) is copied in, and ${migNodeShort('client')} is started with <code>-Dmigrate -DmigrateFromVersion=${src}${TARGET === VIA ? ` -DmigratedVersion=${VIA}` : ''}</code>. It updates APIs, applications and other API Manager data in both databases. That JAR is removed too.` },
+        ...(useTempVm('client') ? [{ label: 'removevm', title: 'Remove the temporary VM',
+          text: `The databases are now migrated. The temporary VM has done its job and is removed. Next, the ${TARGET} deployment on Kubernetes connects to these databases.` }] : []),
+      ],
+      timeline: (tl, s) => {
+        tl.addLabel('sql');
+        flyDoc(tl, s.sqlDoc, 690);
+        dbUpdate(tl, s.dbTgtS, { rows: [0] });
+        wait(tl);
+
+        if (s.vm) {
+          tl.addLabel('tempvm');
+          tl.fromTo(s.vm.g, { opacity: 0 }, { opacity: 1, duration: 0.8 });
+          draw(tl, s.vmLinks, '+=0.2');
+          wait(tl);
+        }
+
+        tl.addLabel('identity');
+        runClient(tl, s, s.jarId, s.termId, 'migId', 'identity', () => {
+          dbUpdate(tl, s.dbTgtS, { rows: [1] });
+          dbUpdate(tl, s.dbTgtA, { rows: [0] }, '<');
+        });
+        wait(tl);
+
+        tl.addLabel('apimig');
+        runClient(tl, s, s.jarApim, s.termApim, 'migApim', 'apimig', () => {
+          dbUpdate(tl, s.dbTgtS, { rows: [2], add: true, swap: true });
+          dbUpdate(tl, s.dbTgtA, { rows: [1, 2], add: true, swap: true }, '<');
+        });
+        wait(tl);
+
+        if (s.vm) {
+          tl.addLabel('removevm');
+          s.vmLinks.forEach((p, i) => tl.to(p, { attr: { 'stroke-dashoffset': p.getTotalLength() }, duration: 0.6, ease: 'none' }, i ? '<' : undefined));
+          tl.to(s.vm.g, { opacity: 0, duration: 0.7 });
+          wait(tl, 2.4);
+        }
+      },
+    },
+  };
+
+  SCENARIOS.twostep = {
+    name: `Two-step migration via ${VIA}`,
+    summary: () => `A direct migration to ${TARGET} is not possible. Copy both databases, migrate them to ${VIA} on a temporary APIM ${VIA} node (SQL script on SHARED_DB, then the identity and API Manager migration clients), remove that node, then run the ${VIA} → ${TARGET} SQL script on APIM_DB.`,
+    sharedAfter: () => `schema ${VIA}`,
+    steps: (src) => [
+      { label: 'tmp42', title: `Set up a temporary ${VIA} node`,
+        text: `${src} can't be migrated directly to ${TARGET}, so the data is first migrated to ${VIA}. A temporary APIM ${VIA} all-in-one node${isK8s() ? ' on a VM' : ''} is connected to the copied databases. It is used only to run the migration and is not tested.` },
+      { label: 'sql', title: `Run the ${VIA} database script`,
+        text: `A SQL script prepares the copied SHARED_DB (the registry database) for ${VIA}.` },
+      { label: 'identity', title: 'Migrate identity data',
+        text: `The identity migration client (a JAR file) is copied into the temporary ${VIA} node, which is started once in migration mode with <code>-Dmigrate -Dcomponent=identity</code>. It updates the identity data in both databases. The JAR is then removed.` },
+      { label: 'apimig', title: `Migrate API Manager data to ${VIA}`,
+        text: `Next, the API Manager migration client for ${VIA} is copied in, and the node is started with <code>-Dmigrate -DmigrateFromVersion=${src} -DmigratedVersion=${VIA}</code>. Both databases are now at ${VIA}.` },
+      { label: 'removetmp', title: `Remove the temporary ${VIA} node`,
+        text: `The temporary ${VIA} node has done its job and is removed. No testing is done on it.` },
+      { label: 'migrate', title: `Run the ${VIA} → ${TARGET} script`,
+        text: `Finally, the ${VIA} → ${TARGET} SQL script runs on APIM_DB. This is the same script as in a zero-data migration from ${VIA}. SHARED_DB needs no further changes.` },
+    ],
+    timeline: (tl, s) => {
+      tl.addLabel('tmp42');
+      tl.fromTo(s.vm.g, { opacity: 0 }, { opacity: 1, duration: 0.8 });
+      draw(tl, s.vmLinks, '+=0.2');
+      wait(tl);
+
+      tl.addLabel('sql');
+      flyDoc(tl, s.sqlDoc, 690);
+      dbUpdate(tl, s.dbTgtS, { rows: [0] });
+      wait(tl);
+
+      tl.addLabel('identity');
+      runClient(tl, s, s.jarId, s.termId, 'migId', 'identity', () => {
+        dbUpdate(tl, s.dbTgtS, { rows: [1] });
+        dbUpdate(tl, s.dbTgtA, { rows: [0] }, '<');
+      });
+      wait(tl);
+
+      tl.addLabel('apimig');
+      runClient(tl, s, s.jarApim, s.termApim, 'migApim', 'apimig', () => {
+        dbUpdate(tl, s.dbTgtS, { rows: [2], add: true, swap: true });
+        dbUpdate(tl, s.dbTgtA, { rows: [1], swap: true }, '<');
+      });
+      wait(tl);
+
+      tl.addLabel('removetmp');
+      s.vmLinks.forEach((p, i) => tl.to(p, { attr: { 'stroke-dashoffset': p.getTotalLength() }, duration: 0.6, ease: 'none' }, i ? '<' : undefined));
+      tl.to(s.vm.g, { opacity: 0, duration: 0.7 });
+      wait(tl, 2.4);
+
+      tl.addLabel('migrate');
+      flyDoc(tl, s.sqlDoc, 810);
+      dbUpdate(tl, s.dbTgtA, { rows: [2], add: true });
+      // second schema change on APIM_DB (4.2.0 -> target), SHARED_DB becomes ready for the target
+      tl.to([s.dbTgtA.schemaB, s.dbTgtS.schemaB], { opacity: 0, duration: 0.3 }, '<');
+      tl.to([s.dbTgtA.schemaC, s.dbTgtS.schemaC], { opacity: 1, duration: 0.3 }, '<0.15');
+      wait(tl);
+    },
+  };
+
+  function stepsFor(scn, mode) {
+    const sc = SCENARIOS[scn], m = MODE_TEXT[mode], src = SRC;
+    const running = isDist()
+      ? `Clients call APIs through the load balancer / DNS. The Gateway forwards each call to your backend services and returns the response. The Control Plane (Publisher, Developer Portal, Admin Portal, Key Manager) and the Traffic Manager use SHARED_DB and APIM_DB${gwUsesDb(src) ? '; in this version the Gateway connects to the databases too' : ''}. API calls are not stored in the databases. This is a generalized view; your deployment may have more nodes or combine roles.`
+      : `Clients call APIs through the load balancer / DNS. The APIM ${src} gateway forwards each call to your backend services and returns the response. API calls are not stored in the databases. SHARED_DB and APIM_DB hold the configuration: APIs, applications, subscriptions, users.`;
+    const build = isDist()
+      ? `New ${TARGET} nodes (Gateway, Control Plane and Traffic Manager) are installed in parallel. They have no databases and receive no traffic. Production keeps running and is not touched.`
+      : `A new APIM ${TARGET} node is installed in parallel. It has no databases and receives no traffic. Production keeps running and is not touched.`;
+    const where = isK8s() ? 'on Kubernetes ' : '';
+    const start = (isDist()
+      ? `The ${TARGET} Control Plane ${where}starts against the migrated databases. Then the Traffic Manager connects to the databases and starts, and finally the Gateway starts${gwUsesDb(TARGET) ? ' and connects to the databases' : ' (from 4.5.0 the Gateway does not need the databases)'}. Everything is tested before any API calls are sent to it.`
+      : `The ${TARGET} deployment ${where}starts normally against the migrated databases and is tested before any API calls are sent to it.`) +
+      (mode === 'freeze' ? ` ${src} is still serving all API calls.` : '');
+    return [
+      { label: 'running', title: 'Production today', text: running },
+      { label: 'build', title: `Build ${TARGET} alongside`, text: build },
+      { label: 'fresh', title: `Test ${TARGET} with fresh databases`,
+        text: `Before touching production data, ${TARGET} gets the migrated configuration and customizations and is started against new, empty databases. Testing it now checks the configuration and custom extensions. No traffic is sent to the backend services during this test. When the tests pass, ${TARGET} is stopped and the fresh databases are discarded.` +
+          (mode === 'downtime' ? ' This happens before the maintenance window, so it adds no downtime.' : ' This happens before the freeze window starts.') },
+      m.hold(src),
+      { label: 'copy', title: 'Copy the data', text: m.copy(src) },
+      ...sc.steps(src),
+      { label: 'start', title: `Start and test ${TARGET}`, text: start },
+      m.switch(src),
+    ];
+  }
+
+  // ---------- geometry ----------
+  // The target row is the source row shifted down by DY. Each deployment type has its own
+  // node layout; traffic and connectors are derived from it.
+  const DY = 340;
+  const GEO = {
+    aio: {
+      entry: (dy) => [370, 165 + dy],          // where API calls enter the node
+      laneStart: (dy) => [610, 115 + dy],      // where calls leave for the backend
+      cpDb: (dy) => [                          // node -> SHARED_DB, node -> APIM_DB
+        [[610, 190 + dy], [640, 190 + dy]],
+        [[610, 225 + dy], [625, 225 + dy], [625, 282 + dy], [810, 282 + dy], [810, 260 + dy]],
+      ],
+      tmDb: null,
+      gwDb: null,
+      inter: null,
+      jar: { land: [560, 400], into: [585, 470] },
+      term: [370, 590],
+    },
+    dist: {
+      entry: (dy) => [370, 107 + dy],
+      laneStart: (dy) => [570, 95 + dy],
+      cpDb: (dy) => [
+        [[570, 170 + dy], [640, 170 + dy]],
+        [[570, 195 + dy], [600, 195 + dy], [600, 286 + dy], [810, 286 + dy], [810, 260 + dy]],
+      ],
+      tmDb: (dy) => [[570, 251 + dy], [620, 251 + dy], [620, 240 + dy], [640, 240 + dy]],
+      gwDb: (dy) => [[570, 122 + dy], [690, 122 + dy], [690, 136 + dy]],
+      // node-to-node links: Gateway-CP, CP-TM, TM-Gateway
+      inter: (dy) => [
+        [[470, 136 + dy], [470, 150 + dy]],
+        [[470, 208 + dy], [470, 222 + dy]],
+        [[370, 128 + dy], [356, 128 + dy], [356, 240 + dy], [370, 240 + dy]],
+      ],
+      jar: { land: [592, 455], into: [555, 505] },
+      term: [640, 392],
+    },
+  };
+  const LB_IN = [170, 360], LB_OUT = [290, 360];
+  // Temporary migration VM (Kubernetes targets), right of the target environment.
+  const VM = {
+    box: [965, 530],
+    links: [
+      [[965, 566], [860, 566]],                                          // -> APIM_DB
+      [[965, 548], [925, 548], [925, 458], [690, 458], [690, 476]],      // -> SHARED_DB
+    ],
+    jar: { land: [1085, 430], into: [1050, 535] },
+    term: [950, 598],
+  };
+  const CLIENTS = [[78, 300], [78, 362], [78, 424]];
+  const BACKEND_PORT = { src: 338, tgt: 382 };
+  const linkPts = (G, dy) => { const [x, y] = G.entry(dy); return [LB_OUT, [330, 360], [330, y], [x, y]]; };
+  const lanePts = (G, dy, xTurn, yIn) => { const [x, y] = G.laneStart(dy); return [[x, y], [xTurn, y], [xTurn, yIn], [960, yIn]]; };
+  const toD = (pts) => 'M' + pts.map((p) => p.join(',')).join(' L');
+
+  // ---------- scene builders ----------
+  let S = null; // current scene
+
+  function region(parent, x, y, w, h, label, color) {
+    const g = el('g', {}, parent);
+    el('rect', { x, y, width: w, height: h, rx: 18, fill: '#ffffff', 'fill-opacity': 0.015,
+      stroke: color, 'stroke-opacity': 0.45, 'stroke-dasharray': '6 6' }, g);
+    txt(g, x + 18, y + 26, label, { 'font-size': 12, fill: color, 'letter-spacing': 1.5, 'font-weight': 600 });
+    return g;
+  }
+
+  // All-in-one node. statuses: { key: [label, color] }; the first one is visible initially.
+  function apimBox(parent, x, y, version, accent, statuses) {
+    const w = 240, h = 150;
+    const g = el('g', { filter: 'url(#shadow)' }, parent);
+    const rect = el('rect', { x, y, width: w, height: h, rx: 12, fill: C.panel, stroke: accent, 'stroke-width': 2 }, g);
+    txt(g, x + 20, y + 30, 'WSO2 API Manager', { 'font-size': 13, fill: C.muted });
+    const ver = txt(g, x + 20, y + 68, version, { 'font-size': 32, 'font-weight': 700, fill: accent });
+    txt(g, x + 20, y + 92, 'All-in-one: gateway + portals', { 'font-size': 12, fill: C.muted });
+    const status = {};
+    Object.entries(statuses).forEach(([k, [label, color]], i) => {
+      status[k] = pill(g, x + 20, y + 110, 200, label, color);
+      if (i > 0) status[k].setAttribute('opacity', 0);
+    });
+    return { g, rect, ver, status };
+  }
+
+  // Compact node for distributed deployments (Gateway, Control Plane, Traffic Manager).
+  function nodeBox(parent, x, y, title, version, accent, statuses) {
+    const w = 200, h = 58;
+    const g = el('g', { filter: 'url(#shadow)' }, parent);
+    const rect = el('rect', { x, y, width: w, height: h, rx: 10, fill: C.panel, stroke: accent, 'stroke-width': 2 }, g);
+    txt(g, x + 14, y + 23, title, { 'font-size': 13, 'font-weight': 600 });
+    const ver = txt(g, x + w - 14, y + 23, version, { 'font-size': 13, 'font-weight': 700, fill: accent, 'text-anchor': 'end' });
+    const status = {};
+    Object.entries(statuses).forEach(([k, [label, color]], i) => {
+      const sg = el('g', {}, g);
+      el('circle', { cx: x + 18, cy: y + 42, r: 3.5, fill: color }, sg);
+      txt(sg, x + 28, y + 46, label, { 'font-size': 11, fill: color });
+      if (i > 0) sg.setAttribute('opacity', 0);
+      status[k] = sg;
+    });
+    return { g, rect, ver, status };
+  }
+
+  const CYL = { w: 100, h: 100, ry: 12 };
+  const DB_LOOK = {
+    real: { stroke: C.db, body: '#221d45', top: '#3a3170' },
+    fresh: { stroke: C.fresh, body: '#3a1740', top: '#6b2a72' },
+  };
+  function cylinder(parent, cx, y, name, schemaLabel, schemaAfter, look = DB_LOOK.real) {
+    const { w, h, ry } = CYL, x = cx - w / 2;
+    const g = el('g', {}, parent);
+    const halo = el('ellipse', { cx, cy: y + 52, rx: 78, ry: 82, fill: look.stroke, opacity: 0, filter: 'url(#blur)' }, g);
+    el('path', { d: `M${x},${y} v${h} a${w / 2},${ry} 0 0 0 ${w},0 v${-h}`, fill: look.body, stroke: look.stroke, 'stroke-width': 2 }, g);
+    el('ellipse', { cx, cy: y, rx: w / 2, ry, fill: look.top, stroke: look.stroke, 'stroke-width': 2 }, g);
+    txt(g, cx, y + 32, name, { 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 600 });
+    const schemaA = txt(g, cx, y + 49, schemaLabel, { 'text-anchor': 'middle', 'font-size': 10, fill: C.muted });
+    const schemaB = txt(g, cx, y + 49, schemaAfter || `schema ${TARGET}`, { 'text-anchor': 'middle', 'font-size': 10, fill: C.ok, opacity: 0 });
+    const rows = [60, 71, 82].map((dy) =>
+      el('rect', { x: cx - 35, y: y + dy, width: 70, height: 7, rx: 2, fill: C.dbRow }, g));
+    const newRow = el('rect', { x: cx - 35, y: y + 93, width: 70, height: 7, rx: 2, fill: C.ok, opacity: 0 }, g);
+    return { g, halo, schemaA, schemaB, rows, newRow };
+  }
+
+  function placeholder(parent, cx, y) {
+    const { w, h, ry } = CYL, x = cx - w / 2;
+    const g = el('g', {}, parent);
+    const st = { fill: 'none', stroke: C.grey, 'stroke-width': 1.5, 'stroke-dasharray': '5 5' };
+    el('path', { d: `M${x},${y} v${h} a${w / 2},${ry} 0 0 0 ${w},0 v${-h}`, ...st }, g);
+    el('ellipse', { cx, cy: y, rx: w / 2, ry, ...st }, g);
+    txt(g, cx, y + 56, 'no database', { 'text-anchor': 'middle', 'font-size': 11, fill: C.grey });
+    return g;
+  }
+
+  function badge(parent, x, y, w, label, color) {
+    const g = el('g', {}, parent);
+    el('rect', { x, y, width: w, height: 26, rx: 13, fill: color, 'fill-opacity': 0.18, stroke: color }, g);
+    txt(g, x + w / 2, y + 17.5, label, { 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 600, fill: color });
+    return g;
+  }
+
+  // A JAR file icon. The full file name shows as a hover tooltip only.
+  function jarIcon(parent, label, fileName) {
+    const g = el('g', {}, parent);
+    el('title', {}, g).textContent = fileName;
+    el('rect', { x: 0, y: 0, width: 58, height: 70, rx: 7, fill: '#7a4b22', stroke: '#d79a5c', 'stroke-width': 1.5 }, g);
+    el('rect', { x: 0, y: 0, width: 58, height: 16, rx: 7, fill: '#a8672e' }, g);
+    txt(g, 29, 45, 'JAR', { 'text-anchor': 'middle', 'font-size': 16, 'font-weight': 700, fill: '#fff4e6' });
+    txt(g, 29, 88, label, { 'text-anchor': 'middle', 'font-size': 12, fill: C.text });
+    return g;
+  }
+
+  // A small console strip showing the migration-mode startup arguments.
+  function terminal(parent, [x, y], args, w = 250) {
+    const lines = [].concat(args);
+    const g = el('g', {}, parent);
+    el('rect', { x, y, width: w, height: 16 + lines.length * 14, rx: 6, fill: '#0a0e17', stroke: C.line }, g);
+    lines.forEach((line, i) => txt(g, x + 10, y + 19 + i * 14, line,
+      { 'font-size': 9.5, fill: C.ok, 'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace' }));
+    return g;
+  }
+
+  const solid = (color, extra = {}) => ({ fill: 'none', stroke: color, 'stroke-opacity': 0.6, 'stroke-width': 2, ...extra });
+  // A connector that starts hidden and is "drawn" by the timeline.
+  function drawable(parent, pts) {
+    const p = el('path', { d: toD(pts), ...solid(C.db) }, parent);
+    const len = p.getTotalLength();
+    p.setAttribute('stroke-dasharray', len);
+    p.setAttribute('stroke-dashoffset', len);
+    return p;
+  }
+
+  // Build the nodes of one environment. Returns { gw, cp, tm, all } where, for all-in-one,
+  // gw and cp are the same box and tm is null.
+  function buildNodes(parent, dy, version, accent, statusSets) {
+    if (!isDist()) {
+      const box = apimBox(parent, 370, 90 + dy, version, accent, statusSets.aio);
+      return { gw: box, cp: box, tm: null, all: [box] };
+    }
+    const gw = nodeBox(parent, 370, 78 + dy, 'Gateway', version, accent, statusSets.gw);
+    const cp = nodeBox(parent, 370, 150 + dy, 'Control Plane', version, accent, statusSets.cp);
+    const tm = nodeBox(parent, 370, 222 + dy, 'Traffic Manager', version, accent, statusSets.tm);
+    return { gw, cp, tm, all: [gw, cp, tm] };
+  }
+
+  const SRC_STATUS = {
+    aio: { run: ['Running · serving traffic', C.ok], frozen: ['Running · changes frozen', C.warn],
+      stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] },
+    gw: { run: ['Serving traffic', C.ok], stopped: ['Stopped', C.muted], standby: ['Standby', C.muted] },
+    cp: { run: ['Running', C.ok], frozen: ['Running · changes frozen', C.warn],
+      stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] },
+    tm: { run: ['Running', C.ok], stopped: ['Stopped', C.muted], standby: ['Standby', C.muted] },
+  };
+  const VM_STATUS = {
+    ready: ['All-in-one · migration only', C.muted], migId: ['Migrating identity data', C.warn],
+    migApim: ['Migrating API Manager data', C.warn], stepDone: ['Migration step done', C.muted],
+  };
+  const TGT_STATUS = {
+    aio: { installed: ['Installed · not started', C.muted], migId: ['Migrating identity data', C.warn],
+      migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · migration step done', C.muted],
+      tested: ['Running · tested, no traffic', C.ok], serving: ['Running · serving traffic', C.ok],
+      freshTest: ['Testing with fresh DBs', C.ok], ready: ['Stopped · tested, ready for data', C.muted] },
+    gw: { installed: ['Not started', C.muted], tested: ['Running · no traffic yet', C.ok], serving: ['Serving traffic', C.ok],
+      freshTest: ['Testing · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted] },
+    cp: { installed: ['Not started', C.muted], migId: ['Migrating identity data', C.warn],
+      migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · step done', C.muted],
+      tested: ['Running · tested', C.ok], freshTest: ['Testing · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted] },
+    tm: { installed: ['Not started', C.muted], tested: ['Running', C.ok],
+      freshTest: ['Testing · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted] },
+  };
+
+  function buildScene(scn, mode) {
+    const src = SRC;
+    const G = GEO[DEP];
+    svg.innerHTML = '';
+    const defs = el('defs', {}, svg);
+    defs.innerHTML = `
+      <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12"/></filter>
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/></filter>`;
+    const layerBg = el('g', {}, svg);
+    const layerLinks = el('g', {}, svg);
+    const envSrc = el('g', {}, svg);
+    const envTgt = el('g', {}, svg);
+    const layerTraffic = el('g', {}, svg);
+    const layerTop = el('g', {}, svg);
+    const s = { layerTraffic, G };
+
+    // Live status panel (top-left), updated every frame from the timeline position.
+    const panel = el('g', {}, layerBg);
+    el('rect', { x: 24, y: 24, width: 290, height: 116, rx: 12, fill: C.panel, stroke: C.line }, panel);
+    txt(panel, 40, 54, 'API calls', { 'font-size': 13, fill: C.muted });
+    txt(panel, 40, 88, 'Changes', { 'font-size': 13, fill: C.muted });
+    txt(panel, 40, 122, 'Served by', { 'font-size': 13, fill: C.muted });
+    s.stApi = pill(panel, 124, 37, 176, '', C.ok);
+    s.stChg = pill(panel, 124, 71, 176, '', C.ok);
+    s.stBy = txt(panel, 124, 122, '', { 'font-size': 13, 'font-weight': 600 });
+
+    // Clients
+    CLIENTS.forEach(([x, y]) => {
+      const g = el('g', {}, layerBg);
+      el('circle', { cx: x, cy: y - 9, r: 7, fill: '#2b3654', stroke: C.muted }, g);
+      el('path', { d: `M${x - 13},${y + 14} a13,11 0 0 1 26,0 z`, fill: '#2b3654', stroke: C.muted }, g);
+    });
+    txt(layerBg, 78, 470, 'API clients', { 'text-anchor': 'middle', fill: C.muted, 'font-size': 13 });
+
+    // Load balancer
+    s.lbRect = el('rect', { x: 170, y: 310, width: 120, height: 100, rx: 12, fill: C.panel, stroke: C.old, 'stroke-width': 2, filter: 'url(#shadow)' }, layerBg);
+    txt(layerBg, 230, 334, 'Load balancer', { 'text-anchor': 'middle', 'font-size': 13 });
+    txt(layerBg, 230, 351, '/ DNS', { 'text-anchor': 'middle', 'font-size': 12, fill: C.muted });
+    s.lbArrow = el('g', {}, layerBg);
+    el('line', { x1: 230, y1: 376, x2: 266, y2: 376, stroke: C.text, 'stroke-width': 3, 'stroke-linecap': 'round' }, s.lbArrow);
+    el('path', { d: 'M266,376 l-9,-6 v12 z', fill: C.text }, s.lbArrow);
+    el('circle', { cx: 230, cy: 376, r: 4, fill: C.text }, layerBg);
+    s.lbDown = badge(layerTop, 168, 274, 124, 'Maintenance', C.bad);
+
+    // Backend (shared by both versions)
+    const be = el('g', { filter: 'url(#shadow)' }, layerBg);
+    el('rect', { x: 960, y: 290, width: 210, height: 140, rx: 12, fill: C.panel, stroke: C.backend, 'stroke-width': 2 }, be);
+    txt(be, 980, 318, 'Backend services', { 'font-size': 14, 'font-weight': 600, fill: C.backend });
+    txt(be, 980, 336, 'your APIs’ real implementation', { 'font-size': 11, fill: C.muted });
+    [350, 372, 394].forEach((y) => {
+      el('rect', { x: 980, y, width: 170, height: 16, rx: 4, fill: '#12302f', stroke: C.backend, 'stroke-opacity': 0.5 }, be);
+      el('circle', { cx: 990, cy: y + 8, r: 2.5, fill: C.backend }, be);
+      el('circle', { cx: 999, cy: y + 8, r: 2.5, fill: C.backend, 'fill-opacity': 0.5 }, be);
+    });
+    if (isDist()) {
+      const note = el('g', {}, layerBg);
+      ['Generalized distributed view:', 'Gateway, Control Plane and', 'Traffic Manager stand for all', 'distributed patterns.']
+        .forEach((line, i) => txt(note, 30, 520 + i * 16, line, { 'font-size': 11.5, fill: C.muted, 'font-style': 'italic' }));
+    }
+
+    // Links: LB -> nodes, gateway -> backend
+    const dashed = (color, extra = {}) => ({ fill: 'none', stroke: color, 'stroke-opacity': 0.55, 'stroke-width': 2, 'stroke-dasharray': '4 6', ...extra });
+    s.linkSrc = el('path', { d: toD(linkPts(G, 0)), ...dashed(C.old) }, layerLinks);
+    s.linkTgt = el('path', { d: toD(linkPts(G, DY)), ...dashed(C.neu), opacity: 0 }, layerLinks);
+    s.laneSrcPts = lanePts(G, 0, 930, BACKEND_PORT.src);
+    s.laneTgtPts = lanePts(G, DY, 945, BACKEND_PORT.tgt);
+    s.laneSrc = el('path', { d: toD(s.laneSrcPts), ...dashed(C.backend) }, layerLinks);
+    s.laneTgt = el('path', { d: toD(s.laneTgtPts), ...dashed(C.backend), opacity: 0 }, layerLinks);
+
+    const depLabel = isDist() ? ' · DISTRIBUTED' : '';
+    // Source environment
+    s.envSrc = envSrc;
+    region(envSrc, 340, 40, 560, 262, `PRODUCTION · APIM ${src}${depLabel}`, C.old);
+    s.connSrc = G.cpDb(0).map((pts) => el('path', { d: toD(pts), ...solid(C.db) }, envSrc));
+    if (G.tmDb) el('path', { d: toD(G.tmDb(0)), ...solid(C.db) }, envSrc);
+    if (G.gwDb && gwUsesDb(src)) el('path', { d: toD(G.gwDb(0)), ...solid(C.db) }, envSrc);
+    const interStyle = { fill: 'none', stroke: C.muted, 'stroke-opacity': 0.7, 'stroke-width': 1.5, 'stroke-dasharray': '2 3' };
+    if (G.inter) G.inter(0).forEach((pts) => el('path', { d: toD(pts), ...interStyle }, envSrc));
+    s.src = buildNodes(envSrc, 0, src, C.old, SRC_STATUS);
+    s.dbSrcS = cylinder(envSrc, 690, 148, 'SHARED_DB', `schema ${src}`);
+    s.dbSrcA = cylinder(envSrc, 810, 148, 'APIM_DB', `schema ${src}`);
+    s.freezeBadge = badge(layerTop, 690, 52, 190, '🔒 Changes frozen', C.warn);
+
+    // Target environment
+    s.regionTgt = region(envTgt, 340, 40 + DY, 560, 262, `NEW · APIM ${TARGET}${depLabel}${isK8s() ? ' · KUBERNETES' : ''}`, C.neu);
+    s.interTgt = G.inter ? G.inter(DY).map((pts) => el('path', { d: toD(pts), ...interStyle, opacity: 0 }, envTgt)) : [];
+    s.connTgtCp = G.cpDb(DY).map((pts) => drawable(envTgt, pts));
+    s.connTgtTm = G.tmDb ? drawable(envTgt, G.tmDb(DY)) : null;
+    s.connTgtGw = G.gwDb && gwUsesDb(TARGET) ? drawable(envTgt, G.gwDb(DY)) : null;
+    s.tgt = buildNodes(envTgt, DY, TARGET, C.grey, TGT_STATUS);
+    s.placeholders = el('g', {}, envTgt);
+    placeholder(s.placeholders, 690, 148 + DY);
+    placeholder(s.placeholders, 810, 148 + DY);
+    // Fresh, empty databases used only to test the new setup before the real data arrives.
+    s.freshS = cylinder(envTgt, 690, 148 + DY, 'SHARED_DB', 'FRESH · EMPTY', null, DB_LOOK.fresh);
+    s.freshA = cylinder(envTgt, 810, 148 + DY, 'APIM_DB', 'FRESH · EMPTY', null, DB_LOOK.fresh);
+    [s.freshS, s.freshA].forEach((d) => {
+      d.rows.forEach((r) => r.setAttribute('opacity', 0));
+      d.schemaA.setAttribute('fill', C.fresh);
+      d.schemaA.setAttribute('font-weight', 600);
+    });
+    s.cfgBadge = badge(layerTop, 610, 326, 290, `⚙ ${TARGET}: migrated configs & customizations`, C.neu);
+    s.passBadge = badge(layerTop, 740, 392, 150, '✓ Tests passed', C.ok);
+    s.dbTgtS = cylinder(envTgt, 690, 148 + DY, 'SHARED_DB', `${src} copy`, SCENARIOS[scn].sharedAfter());
+    s.dbTgtA = cylinder(envTgt, 810, 148 + DY, 'APIM_DB', `${src} copy`);
+
+    // Migration script document
+    s.sqlDoc = el('g', {}, layerTop);
+    el('path', { d: 'M0,0 H54 L70,16 V86 H0 Z', fill: '#f4f1e8', stroke: '#c9c2ad' }, s.sqlDoc);
+    el('path', { d: 'M54,0 V16 H70', fill: '#dcd5c0', stroke: '#c9c2ad' }, s.sqlDoc);
+    txt(s.sqlDoc, 10, 30, 'SQL', { 'font-size': 16, 'font-weight': 700, fill: '#26406b' });
+    [42, 52, 62, 72].forEach((y, i) => el('rect', { x: 10, y, width: [48, 38, 44, 30][i], height: 4, rx: 2, fill: '#b9b3a2' }, s.sqlDoc));
+    txt(s.sqlDoc, 35, 104, 'migration.sql', { 'text-anchor': 'middle', 'font-size': 12, fill: C.text });
+
+    // Migration clients (used by scenarios that need them)
+    s.jarId = jarIcon(layerTop, 'Identity migration', 'org.wso2.carbon.is.migration-x.x.x.jar');
+    const clientVer = scn === 'twostep' ? VIA : TARGET;
+    s.jarApim = jarIcon(layerTop, 'API-M migration', `org.wso2.carbon.apimgt.migrate.client-${clientVer}.x.jar`);
+    if (useTempNode(scn)) {
+      const vmLayer = el('g', {}, layerTop);
+      s.vmLinks = VM.links.map((pts) => drawable(vmLayer, pts));
+      const title = scn === 'twostep' && !isK8s() ? 'Temporary node' : 'Temporary VM';
+      s.vm = nodeBox(vmLayer, VM.box[0], VM.box[1], title, clientVer, C.muted, VM_STATUS);
+      s.vm.rect.setAttribute('stroke-dasharray', '6 4');
+      // links belong to the VM's group so they fade with it. The group is only faded, never scaled:
+      // scaling a group whose bounding box changes (links drawing in) leaves GSAP with an offset.
+      s.vm.g.insertBefore(vmLayer.removeChild(s.vmLinks[0]), s.vm.g.firstChild);
+      s.vm.g.insertBefore(vmLayer.removeChild(s.vmLinks[1]), s.vm.g.firstChild);
+      s.vm.g.removeAttribute('filter');
+    }
+    const term = s.vm ? VM.term : G.term, termW = s.vm ? 225 : 250;
+    s.termId = terminal(layerTop, term, '-Dmigrate -Dcomponent=identity', termW);
+    s.termApim = terminal(layerTop, term, scn === 'twostep' || TARGET === VIA
+      ? [`-Dmigrate -DmigrateFromVersion=${src}`, `-DmigratedVersion=${VIA}`]
+      : `-Dmigrate -DmigrateFromVersion=${src}`, termW);
+    if (scn === 'twostep') {
+      // a third label for the second schema change (4.2.0 -> target)
+      [[s.dbTgtS, 690, `ready for ${TARGET}`], [s.dbTgtA, 810, `schema ${TARGET}`]].forEach(([db, cx, label]) => {
+        db.schemaC = txt(db.g, cx, 148 + DY + 49, label, { 'text-anchor': 'middle', 'font-size': 10, fill: C.ok, opacity: 0 });
+      });
+      s.dbTgtA.schemaB.textContent = `schema ${VIA}`;
+    }
+
+    // Legend
+    const lg = el('g', {}, layerBg);
+    [[C.packet, 'API call (client → gateway → backend)'], [C.db, 'Data change (new API, app, subscription)'],
+     [C.bad, 'API call rejected']].forEach(([color, label], i) => {
+      const x = [40, 310, 590][i];
+      el('circle', { cx: x, cy: 670, r: 5, fill: color }, lg);
+      txt(lg, x + 12, 674.5, label, { 'font-size': 12, fill: C.muted });
+    });
+    if (isDist()) {
+      el('line', { x1: 734, y1: 670, x2: 752, y2: 670, ...interStyle }, lg);
+      txt(lg, 760, 674.5, 'Node-to-node link', { 'font-size': 12, fill: C.muted });
+    }
+    el('rect', { x: 914, y: 663, width: 14, height: 14, rx: 3, fill: DB_LOOK.fresh.body, stroke: C.fresh }, lg);
+    txt(lg, 936, 674.5, 'Fresh test database', { 'font-size': 12, fill: C.muted });
+
+    // Initial state
+    gsap.set([s.regionTgt, ...s.tgt.all.map((b) => b.g), s.placeholders, s.linkTgt, s.lbDown, s.freezeBadge,
+      s.termId, s.termApim], { opacity: 0 });
+    gsap.set(s.sqlDoc, { x: 1230, y: 250, opacity: 0 });
+    gsap.set([s.jarId, s.jarApim], { x: 1230, y: 420, opacity: 0 });
+    if (s.vm) gsap.set(s.vm.g, { opacity: 0 });
+    gsap.set([s.freshS.g, s.freshA.g, s.cfgBadge, s.passBadge], { opacity: 0 });
+    gsap.set(s.lbArrow, { rotation: -38, svgOrigin: '230 376' });
+    return s;
+  }
+
+  // ---------- timeline building blocks ----------
+  const HOLD = 3.2;
+  const wait = (tl, d = HOLD) => tl.to({}, { duration: d });
+
+  function showStatus(tl, box, key, pos) {
+    const others = Object.entries(box.status).filter(([k]) => k !== key).map(([, p]) => p);
+    tl.to(others, { opacity: 0, duration: 0.3 }, pos);
+    tl.to(box.status[key], { opacity: 1, duration: 0.3 }, '<0.15');
+  }
+
+  // Fly the SQL document in from the right and drop it into the database at cx.
+  function flyDoc(tl, doc, cx) {
+    tl.fromTo(doc, { opacity: 0, x: 1230, y: 250, scale: 1 },
+      { opacity: 1, x: cx - 35, y: 360, duration: 1.3, ease: 'power2.out' });
+    tl.to(doc, { y: 480, scale: 0.3, opacity: 0, transformOrigin: '50% 100%', duration: 0.6, ease: 'power2.in' }, '+=0.7');
+  }
+
+  // Visible change to a database: glow, some rows turn green, maybe a new row,
+  // maybe the schema label switches to the target version.
+  function dbUpdate(tl, db, { rows = [], add = false, swap = false }, pos) {
+    tl.to(db.halo, { opacity: 0.6, duration: 0.3 }, pos);
+    rows.forEach((r, i) => tl.to(db.rows[r], { attr: { fill: C.ok }, duration: 0.5 }, i === 0 ? '<' : '<0.25'));
+    if (add) {
+      tl.fromTo(db.newRow, { opacity: 0, scaleX: 0 },
+        { opacity: 1, scaleX: 1, transformOrigin: '0% 50%', duration: 0.5 }, '<0.25');
+    }
+    if (swap) {
+      tl.to(db.schemaA, { opacity: 0, duration: 0.3 }, '<');
+      tl.to(db.schemaB, { opacity: 1, duration: 0.3 }, '<0.15');
+    }
+    tl.to(db.halo, { opacity: 0, duration: 0.7 });
+  }
+
+  function draw(tl, paths, pos) {
+    paths.filter(Boolean).forEach((p, i) =>
+      tl.to(p, { attr: { 'stroke-dashoffset': 0 }, duration: 0.8, ease: 'none' }, i === 0 ? pos : '<0.1'));
+  }
+
+  // Bring a target node to life: border and version turn blue, status changes.
+  function activate(tl, box, statusKey, pos) {
+    tl.to(box.rect, { attr: { stroke: C.neu }, duration: 0.5 }, pos);
+    tl.to(box.ver, { attr: { fill: C.neu }, duration: 0.5 }, '<');
+    showStatus(tl, box, statusKey, '<');
+  }
+
+  // Copy a migration client JAR into the node that runs migrations (AIO node or Control Plane),
+  // start it in migration mode, let it change the databases, then stop it and remove the JAR.
+  // Adds labels <name>Run / <name>Done; the traffic loop shows DB writes between them.
+  function runClient(tl, s, jar, term, statusKey, name, changes) {
+    const { land, into } = s.vm ? VM.jar : s.G.jar;
+    const node = s.vm || s.tgt.cp;
+    tl.fromTo(jar, { opacity: 0, x: 1230, y: 420, scale: 1 },
+      { opacity: 1, x: land[0], y: land[1], duration: 1.2, ease: 'power2.out' });
+    tl.to(jar, { x: into[0], y: into[1], scale: 0.35, opacity: 0, transformOrigin: '50% 50%', duration: 0.6, ease: 'power2.in' }, '+=0.5');
+    if (!s.vm) draw(tl, s.connTgtCp);
+    tl.to(term, { opacity: 1, duration: 0.4 }, '<');
+    tl.to(node.rect, { attr: { stroke: C.warn }, duration: 0.4 }, '<');
+    showStatus(tl, node, statusKey, '<');
+    tl.addLabel(name + 'Run');
+    wait(tl, 1.6);
+    changes();
+    tl.addLabel(name + 'Done');
+    tl.to(term, { opacity: 0, duration: 0.4 }, '+=0.4');
+    tl.to(node.rect, { attr: { stroke: C.grey }, duration: 0.4 }, '<');
+    showStatus(tl, node, 'stepDone', '<');
+    // the JAR is taken out again
+    tl.fromTo(jar, { opacity: 0, x: into[0], y: into[1], scale: 0.35 },
+      { opacity: 0.9, x: into[0] + 55, y: land[1], scale: 0.6, duration: 0.5, ease: 'power2.out', immediateRender: false });
+    tl.to(jar, { opacity: 0, y: land[1] - 40, duration: 0.5 });
+  }
+
+  function buildTimeline(scn, mode, s) {
+    const tl = gsap.timeline({ paused: true, onComplete: () => setPlayLabel() });
+    const srcBoxes = s.src.all, tgtBoxes = s.tgt.all;
+
+    tl.addLabel('running', 0);
+    wait(tl, 4);
+
+    tl.addLabel('build');
+    tl.to(s.regionTgt, { opacity: 1, duration: 0.8 });
+    tl.fromTo(tgtBoxes.map((b) => b.g), { opacity: 0, scale: 0.85 },
+      { opacity: 1, scale: 1, transformOrigin: '50% 50%', duration: 0.8, ease: 'back.out(1.6)', stagger: 0.15 }, '<0.2');
+    tl.to(s.placeholders, { opacity: 1, duration: 0.6 });
+    wait(tl);
+
+    // Test the new setup with migrated configs and fresh, empty databases, then reset it.
+    tl.addLabel('fresh');
+    const freshLinks = [...s.connTgtCp, s.connTgtTm, s.connTgtGw].filter(Boolean);
+    tl.fromTo(s.cfgBadge, { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' });
+    tl.to(s.placeholders, { opacity: 0, duration: 0.4 }, '+=0.3');
+    tl.to([s.freshS.g, s.freshA.g], { opacity: 1, duration: 0.6, stagger: 0.2 }, '<');
+    tl.set(freshLinks, { attr: { stroke: C.fresh } }, '<');
+    draw(tl, freshLinks);
+    s.tgt.all.forEach((b, i) => activate(tl, b, 'freshTest', i ? '<0.2' : undefined));
+    if (s.interTgt.length) tl.to(s.interTgt, { opacity: 1, duration: 0.4 }, '<');
+    tl.addLabel('freshRun');
+    wait(tl, 2.4);
+    tl.fromTo(s.passBadge, { opacity: 0, scale: 0.8 },
+      { opacity: 1, scale: 1, transformOrigin: '50% 50%', duration: 0.5, ease: 'back.out(2)' });
+    wait(tl, 1.2);
+    tl.addLabel('freshDone');
+    s.tgt.all.forEach((b, i) => {
+      showStatus(tl, b, 'ready', i ? '<' : undefined);
+      tl.to(b.rect, { attr: { stroke: C.grey }, duration: 0.4 }, '<');
+      tl.to(b.ver, { attr: { fill: C.grey }, duration: 0.4 }, '<');
+    });
+    freshLinks.forEach((p, i) =>
+      tl.to(p, { attr: { 'stroke-dashoffset': p.getTotalLength() }, duration: 0.5, ease: 'none' }, i ? '<' : '+=0.2'));
+    if (s.interTgt.length) tl.to(s.interTgt, { opacity: 0, duration: 0.4 }, '<');
+    tl.set(freshLinks, { attr: { stroke: C.db } });
+    tl.to([s.freshS.g, s.freshA.g], { opacity: 0, duration: 0.6 }, '+=0.2');
+    tl.to(s.placeholders, { opacity: 1, duration: 0.5 }, '<0.3');
+    tl.to(s.passBadge, { opacity: 0, duration: 0.4 }, '<');
+    wait(tl, 1.5);
+
+    if (mode === 'downtime') {
+      tl.addLabel('stop');
+      tl.to(s.lbDown, { opacity: 1, duration: 0.4 });
+      tl.to(s.lbRect, { attr: { stroke: C.bad }, duration: 0.4 }, '<');
+      // let in-flight calls drain, then shut the source down
+      srcBoxes.forEach((b, i) => {
+        showStatus(tl, b, 'stopped', i === 0 ? '+=1.6' : '<');
+        tl.to(b.rect, { attr: { stroke: C.grey }, duration: 0.5 }, '<');
+      });
+      tl.to([s.linkSrc, s.laneSrc], { opacity: 0.15, duration: 0.5 }, '<');
+    } else {
+      tl.addLabel('freeze');
+      tl.fromTo(s.freezeBadge, { opacity: 0, scale: 0.8 },
+        { opacity: 1, scale: 1, transformOrigin: '50% 50%', duration: 0.5, ease: 'back.out(2)' });
+      tl.to(s.connSrc, { opacity: 0.25, duration: 0.4 }, '<');
+      showStatus(tl, s.src.cp, 'frozen', '<');
+    }
+    wait(tl);
+
+    tl.addLabel('copy');
+    tl.to([s.dbSrcS.halo, s.dbSrcA.halo], { opacity: 0.55, duration: 0.4, yoyo: true, repeat: 1 });
+    tl.fromTo(s.dbTgtS.g, { opacity: 0, y: -DY }, { opacity: 1, y: 0, duration: 1.8, ease: 'power2.inOut' });
+    tl.fromTo(s.dbTgtA.g, { opacity: 0, y: -DY }, { opacity: 1, y: 0, duration: 1.8, ease: 'power2.inOut' }, '<0.4');
+    tl.to(s.placeholders, { opacity: 0, duration: 0.4 }, '-=0.5');
+    wait(tl);
+
+    SCENARIOS[scn].timeline(tl, s);
+
+    // Start order: AIO node, or Control Plane -> Traffic Manager -> Gateway.
+    tl.addLabel('start');
+    draw(tl, s.connTgtCp);
+    activate(tl, s.tgt.cp, 'tested');
+    if (isDist()) {
+      draw(tl, [s.connTgtTm], '+=0.4');
+      activate(tl, s.tgt.tm, 'tested');
+      if (s.connTgtGw) draw(tl, [s.connTgtGw], '+=0.4');
+      activate(tl, s.tgt.gw, 'tested', s.connTgtGw ? undefined : '+=0.4');
+    }
+    if (s.interTgt.length) tl.to(s.interTgt, { opacity: 1, duration: 0.5 }, '<');
+    tl.to(s.laneTgt, { opacity: 0.5, duration: 0.5 }, '<');
+    wait(tl);
+
+    tl.addLabel('switch');
+    tl.to(s.linkTgt, { opacity: 1, duration: 0.5 });
+    tl.to(s.laneTgt, { opacity: 1, duration: 0.5 }, '<');
+    tl.to(s.lbArrow, { rotation: 38, svgOrigin: '230 376', duration: 0.6, ease: 'back.out(2)' }, '<');
+    tl.to(s.lbRect, { attr: { stroke: C.neu }, duration: 0.5 }, '<');
+    tl.to(mode === 'downtime' ? s.lbDown : s.freezeBadge, { opacity: 0, duration: 0.4 }, '<');
+    showStatus(tl, s.tgt.gw, 'serving', '+=0.4');
+    if (mode === 'freeze') {
+      tl.to([s.linkSrc, s.laneSrc], { opacity: 0.15, duration: 0.6 }, '<');
+      srcBoxes.forEach((b, i) => showStatus(tl, b, 'standby', i === 0 ? '+=1.5' : '<'));
+    }
+    tl.to(s.envSrc, { opacity: 0.5, duration: 1 }, '+=0.8');
+    wait(tl, 4);
+    return tl;
+  }
+
+  // What the system is doing at timeline time t. Traffic and the status panel read
+  // this every frame, so seeking or stepping backwards always shows the right state.
+  function stateAt(mode, tl, t) {
+    const L = tl.labels;
+    const switched = t >= L.switch + 0.3;
+    const migrating = ['identity', 'apimig'].some((n) => L[n + 'Run'] !== undefined && t >= L[n + 'Run'] && t < L[n + 'Done']);
+    let st;
+    if (mode === 'downtime') {
+      const down = t >= L.stop + 0.3 && !switched;
+      st = {
+        route: down ? null : switched ? 'tgt' : 'src',
+        writes: down ? null : switched ? 'tgt' : 'src',
+        api: down ? ['Down · maintenance', C.bad] : ['Available', C.ok],
+        chg: down ? ['Not possible', C.bad] : ['Allowed', C.ok],
+      };
+    } else {
+      const frozen = t >= L.freeze + 0.3 && !switched;
+      st = {
+        route: switched ? 'tgt' : 'src',
+        writes: frozen ? null : switched ? 'tgt' : 'src',
+        api: ['Available', C.ok],
+        chg: frozen ? ['Frozen', C.warn] : ['Allowed', C.ok],
+      };
+    }
+    st.migrating = migrating;
+    st.freshTest = t >= L.freshRun && t < L.freshDone;
+    return st;
+  }
+
+  // ---------- app state & controls ----------
+  let scn = 'script';
+  let mode = 'freeze';
+  let tl = null;
+  let speed = 1;
+  let shownStep = -1;
+  let STEPS = [];
+  const playerEl = document.getElementById('player');
+  const stepsEl = document.getElementById('steps');
+  const capNum = document.getElementById('capNum');
+  const capTitle = document.getElementById('capTitle');
+  const capText = document.getElementById('capText');
+  const btnPlay = document.getElementById('btnPlay');
+  let stepBtns = [];
+
+  function currentStep(t = tl.time()) {
+    let idx = 0;
+    STEPS.forEach((s, i) => { if (t >= tl.labels[s.label] - 1e-6) idx = i; });
+    return idx;
+  }
+  function renderCaption() {
+    const i = currentStep();
+    if (i === shownStep) return;
+    shownStep = i;
+    const st = STEPS[i];
+    capNum.textContent = `Step ${i + 1} of ${STEPS.length}`;
+    capTitle.textContent = st.title;
+    capText.innerHTML = st.text; // step texts are static strings defined above
+    stepBtns.forEach((b, j) => b.classList.toggle('active', j === i));
+  }
+  let lastPanel = '';
+  function renderPanel(st) {
+    const by = st.route === 'src' ? `APIM ${SRC}` : st.route === 'tgt' ? `APIM ${TARGET}` : '—';
+    const key = st.api[0] + st.chg[0] + by;
+    if (key === lastPanel) return;
+    lastPanel = key;
+    S.stApi.set(...st.api);
+    S.stChg.set(...st.chg);
+    S.stBy.textContent = by;
+    S.stBy.setAttribute('fill', st.route === 'src' ? C.old : st.route === 'tgt' ? C.neu : C.muted);
+  }
+  function setPlayLabel() {
+    btnPlay.textContent = tl.progress() >= 1 ? '⟲ Replay' : tl.paused() ? '▶ Play' : '❚❚ Pause';
+  }
+  function goTo(i) {
+    i = Math.max(0, Math.min(STEPS.length - 1, i));
+    tl.seek(STEPS[i].label, false);
+    renderCaption();
+    setPlayLabel();
+  }
+
+  function load(newScn, newMode, opts = {}) {
+    scn = newScn;
+    mode = newMode;
+    clearTraffic();
+    if (tl) tl.kill();
+    S = buildScene(scn, mode);
+    R = buildRoutes(S);
+    tl = buildTimeline(scn, mode, S);
+    tl.timeScale(speed);
+    STEPS = stepsFor(scn, mode);
+    shownStep = -1;
+    lastPanel = '';
+    document.getElementById('title').textContent = `WSO2 API Manager migration: ${SRC} → ${TARGET}`;
+    document.getElementById('chip').textContent = SCENARIOS[scn].name;
+    document.getElementById('chipDep').textContent = isDist() ? 'Distributed (generalized)' : 'All-in-one';
+    document.getElementById('chipPlat').textContent = isK8s() ? 'Target on Kubernetes' : 'Target on VMs';
+    document.getElementById('subtitle').textContent = MODE_TEXT[mode].subtitle(SRC);
+    document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+    stepsEl.innerHTML = '';
+    stepBtns = STEPS.map((s, i) => {
+      const b = document.createElement('button');
+      b.textContent = `${i + 1}. ${s.title}`;
+      b.onclick = () => goTo(i);
+      stepsEl.appendChild(b);
+      return b;
+    });
+    if (opts.step >= 1) {
+      // Open paused at the end of that step so its animation is visible.
+      const n = Math.min(opts.step, STEPS.length);
+      const end = STEPS[n] ? tl.labels[STEPS[n].label] : tl.duration();
+      tl.seek(end - 0.01);
+    } else {
+      tl.play();
+    }
+    renderCaption();
+    renderPanel(stateAt(mode, tl, tl.time()));
+    setPlayLabel();
+  }
+
+  document.querySelectorAll('.modes button').forEach((b) => {
+    b.onclick = () => {
+      load(scn, b.dataset.mode);
+      syncUrl();
+    };
+  });
+  btnPlay.onclick = () => {
+    if (tl.progress() >= 1) tl.restart();
+    else tl.paused(!tl.paused());
+    setPlayLabel();
+  };
+  document.getElementById('btnRestart').onclick = () => { clearTraffic(); tl.restart(); setPlayLabel(); };
+  document.getElementById('btnPrev').onclick = () => goTo(currentStep() - 1);
+  document.getElementById('btnNext').onclick = () => goTo(currentStep() + 1);
+  document.getElementById('speed').onchange = (e) => { speed = +e.target.value; tl.timeScale(speed); };
+
+  // ---------- live traffic ----------
+  function polyline(pts) {
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) {
+      cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    }
+    return { pts, cum, len: cum[cum.length - 1] };
+  }
+  function pointAt(pl, d) {
+    const { pts, cum } = pl;
+    for (let i = 1; i < pts.length; i++) {
+      if (d <= cum[i]) {
+        const f = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+        return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f];
+      }
+    }
+    return pts[pts.length - 1];
+  }
+  // Routes depend on the deployment layout, so they are rebuilt with each scene.
+  let R = null;
+  function buildRoutes(s) {
+    const G = s.G;
+    return {
+      toLB: CLIENTS.map(([x, y]) => polyline([[x + 16, y], LB_IN])),
+      lbThrough: polyline([LB_IN, LB_OUT]),
+      toNode: { src: polyline(linkPts(G, 0)), tgt: polyline(linkPts(G, DY)) },
+      entry: { src: G.entry(0), tgt: G.entry(DY) },
+      toBackend: { src: polyline(s.laneSrcPts), tgt: polyline(s.laneTgtPts) },
+      backendPort: { src: [960, BACKEND_PORT.src], tgt: [960, BACKEND_PORT.tgt] },
+      toDb: { src: G.cpDb(0).map(polyline), tgt: G.cpDb(DY).map(polyline), vm: VM.links.map(polyline) },
+    };
+  }
+
+  let packets = [];
+  function addPacket(path, color, r, pxPerSec, onArrive) {
+    const c = el('circle', { r, fill: color }, S.layerTraffic);
+    const [x, y] = path.pts[0];
+    c.setAttribute('cx', x);
+    c.setAttribute('cy', y);
+    packets.push({ path, d: 0, c, v: pxPerSec, onArrive });
+  }
+  function clearTraffic() { packets.forEach((p) => p.c.remove()); packets = []; }
+  function ripple(x, y, color, size = 18) {
+    const c = el('circle', { cx: x, cy: y, r: 4, fill: 'none', stroke: color, 'stroke-width': 2 }, S.layerTraffic);
+    gsap.to(c, { attr: { r: size }, opacity: 0, duration: 0.6, ease: 'power1.out', onComplete: () => c.remove() });
+  }
+  const now = () => stateAt(mode, tl, tl.time());
+
+  function spawnRequest() {
+    const i = Math.floor(Math.random() * CLIENTS.length);
+    addPacket(R.toLB[i], C.packet, 5, 230, () => {
+      const target = now().route;
+      if (!target) { // load balancer is in maintenance: reject
+        ripple(...LB_IN, C.bad, 16);
+        return;
+      }
+      addPacket(R.lbThrough, C.packet, 5, 230, () => {
+        addPacket(R.toNode[target], C.packet, 5, 230, () => {
+          ripple(...R.entry[target], target === 'src' ? C.old : C.neu);
+          // the gateway forwards the call to the backend
+          addPacket(R.toBackend[target], C.packet, 5, 260, () => {
+            ripple(...R.backendPort[target], C.backend);
+          });
+        });
+      });
+    });
+  }
+  function spawnWrite(target, speedPx = 170, color = C.db) {
+    const k = Math.random() < 0.5 ? 0 : 1;
+    addPacket(R.toDb[target][k], color, 4, speedPx, null);
+  }
+
+  let last = performance.now(), accReq = 0, accWrite = 0, accMig = 0, accTest = 0;
+  function frame(ts) {
+    if (!tl || playerEl.hidden) { last = ts; requestAnimationFrame(frame); return; }
+    const dt = Math.min(0.05, (ts - last) / 1000) * speed;
+    last = ts;
+    accReq += dt;
+    accWrite += dt;
+    accMig += dt;
+    const st = now();
+    if (accReq > 0.42) { accReq = 0; spawnRequest(); }
+    if (accWrite > 1.5) { accWrite = 0; if (st.writes) spawnWrite(st.writes); }
+    // test data on the new setup while it runs against fresh DBs
+    accTest += dt;
+    if (accTest > 0.7) {
+      accTest = 0;
+      if (st.freshTest) {
+        // no calls go to the backend during this test; only test data in the fresh DBs
+        spawnWrite('tgt', 170, C.fresh);
+      }
+    }
+    // migration clients rewrite data in both target databases
+    if (accMig > 0.12) { accMig = 0; if (st.migrating) spawnWrite(S.vm ? 'vm' : 'tgt', 260); }
+    const current = packets;
+    const next = [];
+    packets = []; // onArrive() adds the next hop here
+    for (const p of current) {
+      p.d += p.v * dt;
+      if (p.d >= p.path.len) {
+        p.c.remove();
+        if (p.onArrive) p.onArrive();
+      } else {
+        const [x, y] = pointAt(p.path, p.d);
+        p.c.setAttribute('cx', x);
+        p.c.setAttribute('cy', y);
+        next.push(p);
+      }
+    }
+    packets = next.concat(packets);
+    renderCaption();
+    renderPanel(st);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- setup screen ----------
+  const setupEl = document.getElementById('setup');
+  const selSrc = document.getElementById('selSrc');
+  const selTgt = document.getElementById('selTgt');
+  const approachEl = document.getElementById('approach');
+  const btnGo = document.getElementById('btnGo');
+  const option = (v) => { const o = document.createElement('option'); o.value = v; o.textContent = `APIM ${v}`; return o; };
+  const radio = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
+  const setRadio = (name, value) => { document.querySelector(`input[name="${name}"][value="${value}"]`).checked = true; };
+  SOURCES.forEach((v) => selSrc.appendChild(option(v)));
+
+  function fillTargets() {
+    const keep = selTgt.value;
+    selTgt.innerHTML = '';
+    TARGETS.filter((t) => strategyFor(selSrc.value, t)).forEach((t) => selTgt.appendChild(option(t)));
+    const opts = [...selTgt.options].map((o) => o.value);
+    selTgt.value = opts.includes(keep) ? keep : opts[opts.length - 1];
+    describe();
+  }
+  function describe() {
+    const st = strategyFor(selSrc.value, selTgt.value);
+    approachEl.classList.toggle('bad', !st);
+    btnGo.disabled = !st;
+    const k8s = radio('plat') === 'k8s';
+    const vmNote = !st || !k8s || st === 'twostep' ? ''
+      : st === 'client' ? ' The target runs on Kubernetes, so the migration clients run on a temporary all-in-one VM that is removed afterwards.'
+      : ' No temporary VM is needed: only a SQL script runs.';
+    approachEl.innerHTML = st
+      ? `<strong>${SCENARIOS[st].name}.</strong> ${SCENARIOS[st].summary()}${vmNote}`
+      : 'There is no documented direct path between these versions.';
+  }
+  selSrc.onchange = fillTargets;
+  selTgt.onchange = describe;
+  document.querySelectorAll('input[name="plat"]').forEach((r) => { r.onchange = describe; });
+
+  function syncUrl() {
+    const q = new URLSearchParams({ src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, downtime: mode === 'downtime' ? 'yes' : 'no' });
+    history.replaceState(null, '', '?' + q);
+  }
+  function start(src, tgt, dep, plat, downtime, opts = {}) {
+    SRC = src;
+    TARGET = tgt;
+    DEP = dep === 'dist' ? 'dist' : 'aio';
+    PLAT = plat === 'k8s' ? 'k8s' : 'vm';
+    setupEl.hidden = true;
+    playerEl.hidden = false;
+    // The answer only sets where the downtime switch starts; it can be flipped any time.
+    load(strategyFor(src, tgt), downtime ? 'downtime' : 'freeze', opts);
+    syncUrl();
+  }
+  btnGo.onclick = () => start(selSrc.value, selTgt.value, radio('dep'), radio('plat'), radio('downtime') === 'yes');
+  document.getElementById('btnSetup').onclick = () => {
+    if (tl) tl.pause();
+    clearTraffic();
+    selSrc.value = SRC;
+    fillTargets();
+    selTgt.value = TARGET;
+    describe();
+    setRadio('dep', DEP);
+    setRadio('plat', PLAT);
+    setRadio('downtime', mode === 'downtime' ? 'yes' : 'no');
+    playerEl.hidden = true;
+    setupEl.hidden = false;
+    history.replaceState(null, '', location.pathname);
+  };
+
+  // ?src=3.2.0&tgt=4.7.0&dep=aio|dist&plat=vm|k8s&downtime=yes|no skips the setup screen.
+  // ?step=N opens paused at the end of step N; ?at=<label> opens paused just after a timeline label.
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('src') && qs.get('tgt') && strategyFor(qs.get('src'), qs.get('tgt'))) {
+    start(qs.get('src'), qs.get('tgt'), qs.get('dep'), qs.get('plat'), qs.get('downtime') === 'yes', { step: parseInt(qs.get('step'), 10) });
+    if (qs.get('at') in tl.labels) {
+      tl.pause().seek(tl.labels[qs.get('at')] + 0.8);
+      renderCaption();
+      setPlayLabel();
+    }
+  } else {
+    selSrc.value = '4.2.0';
+    fillTargets();
+    setupEl.hidden = false;
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
