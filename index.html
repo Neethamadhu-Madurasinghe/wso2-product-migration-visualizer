@@ -16,6 +16,7 @@
     --new: #3ba7ff;      /* target APIM */
     --db: #9b8cff;
     --fresh: #f0abfc;    /* fresh, empty test databases */
+    --is: #a3e635;       /* WSO2 Identity Server as Key Manager */
     --db-row: #4b4380;
     --ok: #34d399;
     --warn: #fbbf24;
@@ -44,6 +45,7 @@
   .setup .radio { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; cursor: pointer; }
   .setup .radio input { accent-color: var(--new); width: 16px; height: 16px; position: relative; top: 2px; }
   .setup .hint { display: block; color: var(--muted); font-size: 13px; }
+  .setup .sub { margin: 4px 0 0 26px; padding-left: 12px; border-left: 2px solid var(--line); }
   .approach {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
     padding: 12px 14px; margin: 0 0 20px; font-size: 14px; color: #c3cbe0;
@@ -58,6 +60,7 @@
   }
   .chip.alt { background: #2a2140; border-color: #5a4a8f; }
   .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .prepared { margin: 0 0 4px; color: var(--muted); font-size: 13px; letter-spacing: 0.3px; }
   @media (max-width: 640px) { .setup .row { grid-template-columns: 1fr; } .setup { margin: 16px auto; padding: 20px; } }
   header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }
   header h1 { font-size: 20px; margin: 0 0 2px; font-weight: 600; }
@@ -86,6 +89,8 @@
   }
   button:hover, select:hover { border-color: #4a5a80; }
   button.primary { background: #26406b; border-color: #36598f; min-width: 92px; }
+  #btnNarrate[aria-pressed="true"] { background: #1b3152; border-color: var(--new); }
+  #voice { max-width: 220px; }
   .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
   .steps button { padding: 5px 10px; font-size: 13px; color: var(--muted); }
   .steps button.active { color: var(--text); border-color: var(--new); background: #1b3152; }
@@ -116,6 +121,18 @@
         <span>Distributed
           <span class="hint">Shown as a generalized pattern: Gateway, Control Plane and Traffic Manager.</span></span></label>
     </fieldset>
+    <fieldset id="kmField">
+      <legend>Key Manager in the current setup</legend>
+      <label class="radio"><input type="radio" name="km" value="resident" checked> API Manager's resident Key Manager</label>
+      <label class="radio"><input type="radio" name="km" value="is">
+        <span>WSO2 Identity Server as Key Manager <span class="hint" id="kmHint"></span></span></label>
+      <div class="sub" id="kmdbField" hidden>
+        <label class="radio"><input type="radio" name="kmdb" value="both" checked>
+          <span>SHARED_DB and APIM_DB are shared <span class="hint">APIM_DB is also IS's identity database</span></span></label>
+        <label class="radio"><input type="radio" name="kmdb" value="shared">
+          <span>Only SHARED_DB is shared <span class="hint">IS has its own identity database</span></span></label>
+      </div>
+    </fieldset>
     <fieldset>
       <legend>Target platform</legend>
       <label class="radio"><input type="radio" name="plat" value="vm" checked> Virtual machines</label>
@@ -135,7 +152,8 @@
   <section id="player" hidden>
   <header>
     <div>
-      <h1><span id="title"></span><span class="chip" id="chip"></span><span class="chip alt" id="chipDep"></span><span class="chip alt" id="chipPlat"></span></h1>
+      <p id="preparedFor" class="prepared" hidden></p>
+      <h1><span id="title"></span><span class="chip" id="chip"></span><span class="chip alt" id="chipDep"></span><span class="chip alt" id="chipPlat"></span><span class="chip alt" id="chipKm"></span></h1>
       <p id="subtitle"></p>
     </div>
     <div class="header-actions">
@@ -144,6 +162,7 @@
         <button data-mode="freeze">Without downtime (freeze window)</button>
       </div>
       <button id="btnSetup" title="Pick other versions or deployment">Change setup</button>
+      <button id="btnExport" title="Download a standalone page for the customer with this setup locked">⬇ Export for customer</button>
     </div>
   </header>
 
@@ -166,6 +185,8 @@
       <option value="1.5">1.5×</option>
       <option value="2">2×</option>
     </select>
+    <button id="btnNarrate" aria-pressed="false" title="Read each step aloud. The animation slows down to match the voice.">🔊 Narrate</button>
+    <select id="voice" title="Narrator voice" hidden></select>
     <div class="steps" id="steps"></div>
   </div>
   </section>
@@ -174,12 +195,19 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script>
 (() => {
+  // The page as loaded, before any script changes. "Export for customer" saves a copy of it
+  // with the chosen setup locked in.
+  const PRISTINE = '<!doctype html>\n' + document.documentElement.outerHTML;
+  // Set only in exported customer files: the setup is fixed and the setup screen is never shown.
+  const LOCK = window.MIGRATION_LOCK || null;
+  const GSAP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js';
+
   // ---------- helpers ----------
   const NS = 'http://www.w3.org/2000/svg';
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
   const C = {
     panel: css('--panel'), line: css('--line'), text: css('--text'), muted: css('--muted'),
-    old: css('--old'), neu: css('--new'), db: css('--db'), dbRow: css('--db-row'), fresh: css('--fresh'),
+    old: css('--old'), neu: css('--new'), db: css('--db'), dbRow: css('--db-row'), fresh: css('--fresh'), is: css('--is'),
     ok: css('--ok'), warn: css('--warn'), bad: css('--bad'), packet: css('--packet'),
     backend: css('--backend'), grey: '#5b6684',
   };
@@ -196,6 +224,24 @@
   const useTempVm = (scn) => isK8s() && scn === 'client';
   // Two-step migrations always use a temporary 4.2.0 all-in-one node.
   const useTempNode = (scn) => useTempVm(scn) || scn === 'twostep';
+
+  // WSO2 IS as Key Manager in the source setup (offered for sources up to 4.2.0).
+  // APIM and IS share databases: 'both' = SHARED_DB and APIM_DB (APIM_DB is also IS's identity DB),
+  // 'shared' = only SHARED_DB (IS has its own IDENTITY_DB).
+  // Target 4.2.0 keeps IS 6.1.0 on the shared DBs ("merged": migrated together). Target 4.3.0+ splits
+  // the DBs per product, moves to IS 7.x as a third-party KM and converts it to work like the resident KM.
+  let KM = 'resident'; // 'resident' | 'is'
+  let KMDB = 'both';   // 'both' | 'shared'
+  const hasIs = () => KM === 'is';
+  const kmAllowed = (src) => vcmp(src, '4.2.0') <= 0;
+  const isMerged = () => hasIs() && TARGET === VIA;
+  const isSplit = () => hasIs() && TARGET !== VIA;
+  const IS_FOR = { '2.6.0': ['IS-KM', '5.7.x'], '2.7.0': ['IS-KM', '5.8.x'], '3.0.0': ['IS-KM', '5.9.0'],
+    '3.1.0': ['IS-KM', '5.10.0'], '3.2.0': ['IS', '5.10.0'], '4.0.0': ['IS', '5.11.0'], '4.1.0': ['IS', '5.11.0'],
+    '4.2.0': ['IS', '6.x'] };
+  const isNameFor = (src) => (IS_FOR[src] || ['IS', '']).join(' ');
+  const isTgtVerFor = (tgt) => tgt === VIA ? '6.1.0' : '7.x';
+  const isTgtVer = () => isTgtVerFor(TARGET);
 
   // Supported paths, from the WSO2 migration docs catalog:
   //  - direct migration with migration clients: 3.2.0 / 4.0.0 / 4.1.0 -> 4.5.0 / 4.6.0 / 4.7.0
@@ -409,28 +455,67 @@
     },
   };
 
+  // Extra steps when WSO2 IS is the Key Manager.
+  function isSteps(scn) {
+    const isT = isTgtVer(), onVm = isK8s() ? `a temporary IS ${isT} VM` : `IS ${isT}`;
+    const ismig = { label: 'ismig', title: `Migrate IS to ${isT}`,
+      text: isMerged()
+        ? `The IS migration client (a JAR file) is copied into ${onVm}, which is started once in migration mode with <code>-Dmigrate -Dcomponent=identity</code>. The databases are shared, so this also updates SHARED_DB${KMDB === 'both' ? ' and APIM_DB' : ''} for API Manager.${isK8s() ? ' The temporary VM is then removed.' : ''}`
+        : `The IS migration client (a JAR file) is copied into ${onVm}, which is started once in migration mode with <code>-Dmigrate -Dcomponent=identity</code>. It updates only IS's own databases; API Manager's databases are not touched.${isK8s() ? ' The temporary VM is then removed.' : ''}` };
+    const merged = [
+      ...(useTempVm(scn) ? [{ label: 'tempvm', title: 'Create a temporary VM',
+        text: `The target runs on Kubernetes, so the API Manager migration client runs on a temporary VM: an all-in-one APIM ${TARGET} node connected to the copied databases.` }] : []),
+      { label: 'apimig', title: 'Migrate API Manager data',
+        text: `Only the API Manager component migration runs: the API-M migration client is copied into ${migNode(scn)} and started with <code>-Dmigrate -DmigrateFromVersion=${SRC} -DmigratedVersion=${VIA}</code>. The SHARED_DB script and the identity migration are skipped, because the IS migration already updated the shared data.` },
+      ...(useTempVm(scn) ? [{ label: 'removevm', title: 'Remove the temporary VM',
+        text: `The databases are now migrated. The temporary VM is removed. Next, the ${TARGET} deployment on Kubernetes connects to these databases.` }] : []),
+    ];
+    const after = [
+      { label: 'connectkm', title: `Connect IS ${isT} as a Key Manager`,
+        text: `APIM ${TARGET} and IS ${isT} are started, and IS ${isT} is added in API Manager as a third-party Key Manager.` },
+      { label: 'convert', title: 'Third-party to resident conversion',
+        text: `Both products are stopped, and a SQL script runs on APIM_DB. It converts the third-party Key Manager setup, so that IS ${isT} works like API Manager's resident Key Manager.` },
+    ];
+    return { ismig, merged, after };
+  }
+
   function stepsFor(scn, mode) {
     const sc = SCENARIOS[scn], m = MODE_TEXT[mode], src = SRC;
     const running = isDist()
-      ? `Clients call APIs through the load balancer / DNS. The Gateway forwards each call to your backend services and returns the response. The Control Plane (Publisher, Developer Portal, Admin Portal, Key Manager) and the Traffic Manager use SHARED_DB and APIM_DB${gwUsesDb(src) ? '; in this version the Gateway connects to the databases too' : ''}. API calls are not stored in the databases. This is a generalized view; your deployment may have more nodes or combine roles.`
+      ? `Clients call APIs through the load balancer / DNS. The Gateway forwards each call to your backend services and returns the response. The Control Plane (Publisher, Developer Portal, Admin Portal, Key Manager) and the Traffic Manager use SHARED_DB and APIM_DB. API calls are not stored in the databases. This is a generalized view; your deployment may have more nodes or combine roles.`
       : `Clients call APIs through the load balancer / DNS. The APIM ${src} gateway forwards each call to your backend services and returns the response. API calls are not stored in the databases. SHARED_DB and APIM_DB hold the configuration: APIs, applications, subscriptions, users.`;
-    const build = isDist()
+    const isRun = !hasIs() ? '' : ` WSO2 ${isNameFor(src)} is the Key Manager. It shares ${KMDB === 'both' ? 'SHARED_DB and APIM_DB with API Manager (APIM_DB is also its identity database)' : 'SHARED_DB with API Manager and keeps its own IDENTITY_DB'}.`;
+    let build = isDist()
       ? `New ${TARGET} nodes (Gateway, Control Plane and Traffic Manager) are installed in parallel. They have no databases and receive no traffic. Production keeps running and is not touched.`
       : `A new APIM ${TARGET} node is installed in parallel. It has no databases and receives no traffic. Production keeps running and is not touched.`;
+    if (hasIs()) build = `New APIM ${TARGET} ${isDist() ? 'nodes' : 'node'} and a new IS ${isTgtVer()} node are installed in parallel. They have no databases and receive no traffic. Production keeps running and is not touched.`;
     const where = isK8s() ? 'on Kubernetes ' : '';
     const start = (isDist()
-      ? `The ${TARGET} Control Plane ${where}starts against the migrated databases. Then the Traffic Manager connects to the databases and starts, and finally the Gateway starts${gwUsesDb(TARGET) ? ' and connects to the databases' : ' (from 4.5.0 the Gateway does not need the databases)'}. Everything is tested before any API calls are sent to it.`
+      ? `The ${TARGET} Control Plane ${where}starts against the migrated databases. Then the Traffic Manager connects to the databases and starts, and finally the Gateway starts. Everything is tested before any API calls are sent to it.`
       : `The ${TARGET} deployment ${where}starts normally against the migrated databases and is tested before any API calls are sent to it.`) +
+      (hasIs() ? ` IS ${isTgtVer()} starts ${isMerged() ? 'as the Key Manager on the shared databases' : 'and works as the resident Key Manager'}.` : '') +
       (mode === 'freeze' ? ` ${src} is still serving all API calls.` : '');
+    const hold = m.hold(src);
+    if (hasIs()) hold.text += mode === 'downtime' ? ' The IS Key Manager is shut down too.' : ' Changes in IS (users, roles, applications) are frozen too.';
+    const copyText = !hasIs() ? m.copy(src)
+      : isMerged()
+        ? `The ${src} databases are backed up and the copies are restored for the new setup. They stay shared between APIM and IS, as in production.`
+        : `The ${src} databases are backed up and restored for the new setup, split per product: shared databases are duplicated, so APIM and IS each get their own copy. That gives 4 databases, none of them shared.`;
+    const X = hasIs() ? isSteps(scn) : null;
     return [
-      { label: 'running', title: 'Production today', text: running },
+      { label: 'running', title: 'Production today', text: running + isRun },
       { label: 'build', title: `Build ${TARGET} alongside`, text: build },
-      { label: 'fresh', title: `Test ${TARGET} with fresh databases`,
-        text: `Before touching production data, ${TARGET} gets the migrated configuration and customizations and is started against new, empty databases. Testing it now checks the configuration and custom extensions. No traffic is sent to the backend services during this test. When the tests pass, ${TARGET} is stopped and the fresh databases are discarded.` +
+      { label: 'fresh', title: hasIs() ? `Test APIM ${TARGET} and IS ${isTgtVer()} use cases with fresh databases` : `Test ${TARGET} use cases with fresh databases`,
+        text: hasIs()
+          ? `Before touching production data, APIM ${TARGET} and IS ${isTgtVer()} both get the migrated configuration and customizations and are started together against new, empty databases, with IS connected as the Key Manager. Both products are tested: basic API Manager testing (sign in to the portals, create and publish an API, subscribe and generate a token) runs with IS issuing the tokens, and your own use cases are validated. No traffic is sent to the backend services during this test. When the tests pass, both are stopped and the fresh databases are discarded.` +
+            (mode === 'downtime' ? ' This happens before the maintenance window, so it adds no downtime.' : ' This happens before the freeze window starts.')
+          : `Before touching production data, ${TARGET} gets the migrated configuration and customizations and is started against new, empty databases. It goes through basic API Manager testing (sign in to the portals, create and publish an API, subscribe and generate a token) and your own use cases are validated, which also checks the configuration and custom extensions. No traffic is sent to the backend services during this test. When the tests pass, ${TARGET} is stopped and the fresh databases are discarded.` +
           (mode === 'downtime' ? ' This happens before the maintenance window, so it adds no downtime.' : ' This happens before the freeze window starts.') },
-      m.hold(src),
-      { label: 'copy', title: 'Copy the data', text: m.copy(src) },
-      ...sc.steps(src),
+      hold,
+      { label: 'copy', title: hasIs() && isSplit() ? 'Copy and split the data' : 'Copy the data', text: copyText },
+      ...(X ? [X.ismig] : []),
+      ...(isMerged() ? X.merged : sc.steps(src)),
+      ...(isSplit() ? X.after : []),
       { label: 'start', title: `Start and test ${TARGET}`, text: start },
       m.switch(src),
     ];
@@ -484,10 +569,42 @@
     jar: { land: [1085, 430], into: [1050, 535] },
     term: [950, 598],
   };
+  // IS-mode layout: an IS column right of the APIM databases; the backend moves further right.
+  const IS = {
+    // x positions: IS SHARED_DB cx 960, IDENTITY_DB cx 1070, IS node 1170-1350
+    S_X: 960, I_X: 1070,
+    node: (dy) => [1170, 160 + dy], nodeW: 180,
+    own: (dy) => ({                       // IS -> its own SHARED_DB and IDENTITY_DB
+      S: [[1170, 205 + dy], [1145, 205 + dy], [1145, 272 + dy], [960, 272 + dy], [960, 260 + dy]],
+      I: [[1170, 190 + dy], [1120, 190 + dy]],
+    }),
+    common: (dy) => ({                    // IS -> API Manager's databases when they are shared
+      S: [[1260, 160 + dy], [1260, 128 + dy], [720, 128 + dy], [720, 138 + dy]],
+      A: [[1260, 160 + dy], [1260, 128 + dy], [840, 128 + dy], [840, 138 + dy]],
+    }),
+    km: (dy) => isDist()                  // Key Manager link to the AIO node / Control Plane
+      ? [[1300, 218 + dy], [1300, 294 + dy], [347, 294 + dy], [347, 190 + dy], [370, 190 + dy]]
+      : [[1300, 218 + dy], [1300, 294 + dy], [490, 294 + dy], [490, 240 + dy]],
+    jar: { land: [1360, 410], into: [1260, 520] },
+    term: [1180, 572],
+  };
+  // In IS mode, temporary migration VMs sit below the target row.
+  const VM_IS = {
+    apim: { box: [620, 668], links: [[[700, 668], [700, 601]], [[790, 668], [790, 600]]],
+      jar: { land: [840, 596], into: [760, 690] }, term: [370, 682] },
+    is: { box: [940, 668], jar: { land: [1160, 596], into: [1040, 690] }, term: [1150, 682],
+      links: () => isSplit()
+        ? [[[970, 668], [970, 600]], [[1070, 668], [1070, 600]]]
+        : [[[940, 690], [730, 690], [730, 595]],
+           KMDB === 'both' ? [[940, 680], [850, 680], [850, 595]] : [[1070, 668], [1070, 600]]] },
+  };
+  const vmGeo = () => hasIs() ? VM_IS.apim : VM;
+  const BE_X = () => hasIs() ? 1450 : 960;     // backend left edge
+  const FLY_X = () => hasIs() ? 1690 : 1230;   // where documents and JARs fly in from
   const CLIENTS = [[78, 300], [78, 362], [78, 424]];
   const BACKEND_PORT = { src: 338, tgt: 382 };
   const linkPts = (G, dy) => { const [x, y] = G.entry(dy); return [LB_OUT, [330, 360], [330, y], [x, y]]; };
-  const lanePts = (G, dy, xTurn, yIn) => { const [x, y] = G.laneStart(dy); return [[x, y], [xTurn, y], [xTurn, yIn], [960, yIn]]; };
+  const lanePts = (G, dy, xTurn, yIn) => { const [x, y] = G.laneStart(dy); return [[x, y], [xTurn, y], [xTurn, yIn], [BE_X(), yIn]]; };
   const toD = (pts) => 'M' + pts.map((p) => p.join(',')).join(' L');
 
   // ---------- scene builders ----------
@@ -518,8 +635,8 @@
   }
 
   // Compact node for distributed deployments (Gateway, Control Plane, Traffic Manager).
-  function nodeBox(parent, x, y, title, version, accent, statuses) {
-    const w = 200, h = 58;
+  function nodeBox(parent, x, y, title, version, accent, statuses, w = 200) {
+    const h = 58;
     const g = el('g', { filter: 'url(#shadow)' }, parent);
     const rect = el('rect', { x, y, width: w, height: h, rx: 10, fill: C.panel, stroke: accent, 'stroke-width': 2 }, g);
     txt(g, x + 14, y + 23, title, { 'font-size': 13, 'font-weight': 600 });
@@ -570,6 +687,38 @@
     el('rect', { x, y, width: w, height: 26, rx: 13, fill: color, 'fill-opacity': 0.18, stroke: color }, g);
     txt(g, x + w / 2, y + 17.5, label, { 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 600, fill: color });
     return g;
+  }
+  // Two-line variant of badge() for longer labels.
+  function badge2(parent, x, y, w, lines, color) {
+    const g = el('g', {}, parent);
+    el('rect', { x, y, width: w, height: 40, rx: 12, fill: color, 'fill-opacity': 0.18, stroke: color }, g);
+    lines.forEach((l, i) => txt(g, x + w / 2, y + 16 + i * 15, l, { 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 600, fill: color }));
+    return g;
+  }
+
+  // A SQL script document icon.
+  function sqlDocIcon(parent, label) {
+    const g = el('g', {}, parent);
+    el('path', { d: 'M0,0 H54 L70,16 V86 H0 Z', fill: '#f4f1e8', stroke: '#c9c2ad' }, g);
+    el('path', { d: 'M54,0 V16 H70', fill: '#dcd5c0', stroke: '#c9c2ad' }, g);
+    txt(g, 10, 30, 'SQL', { 'font-size': 16, 'font-weight': 700, fill: '#26406b' });
+    [42, 52, 62, 72].forEach((y, i) => el('rect', { x: 10, y, width: [48, 38, 44, 30][i], height: 4, rx: 2, fill: '#b9b3a2' }, g));
+    txt(g, 35, 104, label, { 'text-anchor': 'middle', 'font-size': 12, fill: C.text });
+    return g;
+  }
+
+  // A temporary VM node with its DB links inside the same group, so they fade together.
+  // The group is only faded, never scaled: scaling a group whose bounding box changes
+  // (links drawing in) leaves GSAP with an offset.
+  function tempVm(parent, geo, links, title, version, statuses) {
+    const layer = el('g', {}, parent);
+    const paths = links.map((pts) => drawable(layer, pts));
+    const vm = nodeBox(layer, geo.box[0], geo.box[1], title, version, C.muted, statuses);
+    vm.rect.setAttribute('stroke-dasharray', '6 4');
+    paths.forEach((pth) => vm.g.insertBefore(layer.removeChild(pth), vm.g.firstChild));
+    vm.g.removeAttribute('filter');
+    vm.links = paths;
+    return vm;
   }
 
   // A JAR file icon. The full file name shows as a hover tooltip only.
@@ -628,23 +777,39 @@
     ready: ['All-in-one · migration only', C.muted], migId: ['Migrating identity data', C.warn],
     migApim: ['Migrating API Manager data', C.warn], stepDone: ['Migration step done', C.muted],
   };
+  const KM_STATES = {
+    kmSetup: ['Running · connecting IS as KM', C.ok], kmStop: ['Stopped · for KM conversion', C.muted] };
+  const IS_SRC_STATUS = { run: ['Running · Key Manager', C.ok], frozen: ['Running · changes frozen', C.warn],
+    stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] };
+  const IS_TGT_STATUS = { installed: ['Not started', C.muted], freshTest: ['Testing use cases', C.ok],
+    ready: ['Stopped · tested', C.muted], migIs: ['Migrating IS data', C.warn], stepDone: ['Stopped · migration done', C.muted],
+    kmSetup: ['Running · third-party KM', C.ok], kmStop: ['Stopped · for KM conversion', C.muted],
+    tested: ['Running · Key Manager', C.ok] };
+  const IS_VM_STATUS = { ready: ['All-in-one · migration only', C.muted], migIs: ['Migrating IS data', C.warn],
+    stepDone: ['Migration done', C.muted] };
   const TGT_STATUS = {
     aio: { installed: ['Installed · not started', C.muted], migId: ['Migrating identity data', C.warn],
       migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · migration step done', C.muted],
       tested: ['Running · tested, no traffic', C.ok], serving: ['Running · serving traffic', C.ok],
-      freshTest: ['Testing with fresh DBs', C.ok], ready: ['Stopped · tested, ready for data', C.muted] },
+      freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested, ready for data', C.muted], ...KM_STATES },
     gw: { installed: ['Not started', C.muted], tested: ['Running · no traffic yet', C.ok], serving: ['Serving traffic', C.ok],
-      freshTest: ['Testing · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted] },
+      freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
+      kmSetup: ['Running', C.ok], kmStop: ['Stopped', C.muted] },
     cp: { installed: ['Not started', C.muted], migId: ['Migrating identity data', C.warn],
       migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · step done', C.muted],
-      tested: ['Running · tested', C.ok], freshTest: ['Testing · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted] },
+      tested: ['Running · tested', C.ok], freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
+      ...KM_STATES },
     tm: { installed: ['Not started', C.muted], tested: ['Running', C.ok],
-      freshTest: ['Testing · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted] },
+      freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
+      kmSetup: ['Running', C.ok], kmStop: ['Stopped', C.muted] },
   };
 
   function buildScene(scn, mode) {
     const src = SRC;
     const G = GEO[DEP];
+    // IS mode is wider; temporary VMs then sit in an extra row below the target environment.
+    const W = hasIs() ? 1700 : 1200, H = hasIs() && (useTempNode(scn) || isK8s()) ? 790 : 690;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.innerHTML = '';
     const defs = el('defs', {}, svg);
     defs.innerHTML = `
@@ -689,13 +854,14 @@
 
     // Backend (shared by both versions)
     const be = el('g', { filter: 'url(#shadow)' }, layerBg);
-    el('rect', { x: 960, y: 290, width: 210, height: 140, rx: 12, fill: C.panel, stroke: C.backend, 'stroke-width': 2 }, be);
-    txt(be, 980, 318, 'Backend services', { 'font-size': 14, 'font-weight': 600, fill: C.backend });
-    txt(be, 980, 336, 'your APIs’ real implementation', { 'font-size': 11, fill: C.muted });
+    const bx = BE_X();
+    el('rect', { x: bx, y: 290, width: 210, height: 140, rx: 12, fill: C.panel, stroke: C.backend, 'stroke-width': 2 }, be);
+    txt(be, bx + 20, 318, 'Backend services', { 'font-size': 14, 'font-weight': 600, fill: C.backend });
+    txt(be, bx + 20, 336, 'your APIs’ real implementation', { 'font-size': 11, fill: C.muted });
     [350, 372, 394].forEach((y) => {
-      el('rect', { x: 980, y, width: 170, height: 16, rx: 4, fill: '#12302f', stroke: C.backend, 'stroke-opacity': 0.5 }, be);
-      el('circle', { cx: 990, cy: y + 8, r: 2.5, fill: C.backend }, be);
-      el('circle', { cx: 999, cy: y + 8, r: 2.5, fill: C.backend, 'fill-opacity': 0.5 }, be);
+      el('rect', { x: bx + 20, y, width: 170, height: 16, rx: 4, fill: '#12302f', stroke: C.backend, 'stroke-opacity': 0.5 }, be);
+      el('circle', { cx: bx + 30, cy: y + 8, r: 2.5, fill: C.backend }, be);
+      el('circle', { cx: bx + 39, cy: y + 8, r: 2.5, fill: C.backend, 'fill-opacity': 0.5 }, be);
     });
     if (isDist()) {
       const note = el('g', {}, layerBg);
@@ -707,73 +873,115 @@
     const dashed = (color, extra = {}) => ({ fill: 'none', stroke: color, 'stroke-opacity': 0.55, 'stroke-width': 2, 'stroke-dasharray': '4 6', ...extra });
     s.linkSrc = el('path', { d: toD(linkPts(G, 0)), ...dashed(C.old) }, layerLinks);
     s.linkTgt = el('path', { d: toD(linkPts(G, DY)), ...dashed(C.neu), opacity: 0 }, layerLinks);
-    s.laneSrcPts = lanePts(G, 0, 930, BACKEND_PORT.src);
-    s.laneTgtPts = lanePts(G, DY, 945, BACKEND_PORT.tgt);
+    s.laneSrcPts = lanePts(G, 0, hasIs() ? 1415 : 930, BACKEND_PORT.src);
+    s.laneTgtPts = lanePts(G, DY, hasIs() ? 1430 : 945, BACKEND_PORT.tgt);
     s.laneSrc = el('path', { d: toD(s.laneSrcPts), ...dashed(C.backend) }, layerLinks);
     s.laneTgt = el('path', { d: toD(s.laneTgtPts), ...dashed(C.backend), opacity: 0 }, layerLinks);
 
     const depLabel = isDist() ? ' · DISTRIBUTED' : '';
     // Source environment
     s.envSrc = envSrc;
-    region(envSrc, 340, 40, 560, 262, `PRODUCTION · APIM ${src}${depLabel}`, C.old);
+    const RW = hasIs() ? 1050 : 560;
+    region(envSrc, 340, 40, RW, 262, `PRODUCTION · APIM ${src}${depLabel}`, C.old);
     s.connSrc = G.cpDb(0).map((pts) => el('path', { d: toD(pts), ...solid(C.db) }, envSrc));
     if (G.tmDb) el('path', { d: toD(G.tmDb(0)), ...solid(C.db) }, envSrc);
     if (G.gwDb && gwUsesDb(src)) el('path', { d: toD(G.gwDb(0)), ...solid(C.db) }, envSrc);
     const interStyle = { fill: 'none', stroke: C.muted, 'stroke-opacity': 0.7, 'stroke-width': 1.5, 'stroke-dasharray': '2 3' };
     if (G.inter) G.inter(0).forEach((pts) => el('path', { d: toD(pts), ...interStyle }, envSrc));
     s.src = buildNodes(envSrc, 0, src, C.old, SRC_STATUS);
-    s.dbSrcS = cylinder(envSrc, 690, 148, 'SHARED_DB', `schema ${src}`);
-    s.dbSrcA = cylinder(envSrc, 810, 148, 'APIM_DB', `schema ${src}`);
+    s.dbSrcS = cylinder(envSrc, 690, 148, 'SHARED_DB', hasIs() ? 'shared with IS' : `schema ${src}`);
+    s.dbSrcA = cylinder(envSrc, 810, 148, 'APIM_DB', hasIs() && KMDB === 'both' ? 'shared with IS' : `schema ${src}`);
+    const kmStyle = { fill: 'none', stroke: C.is, 'stroke-opacity': 0.8, 'stroke-width': 2 };
+    if (hasIs()) {
+      // Source IS: connected to the shared DBs (and its own IDENTITY_DB) and to APIM as the Key Manager.
+      txt(envSrc, 925, 66, `KEY MANAGER · ${isNameFor(src)}`, { 'font-size': 12, fill: C.is, 'letter-spacing': 1.5, 'font-weight': 600 });
+      const [ix, iy] = IS.node(0);
+      const srcLinks = [IS.common(0).S, KMDB === 'both' ? IS.common(0).A : IS.own(0).I];
+      s.isSrcLinkPts = srcLinks;
+      s.isSrcLinkEls = srcLinks.map((pts) => el('path', { d: toD(pts), ...solid(C.db) }, envSrc));
+      if (KMDB === 'shared') s.dbSrcIsI = cylinder(envSrc, IS.I_X, 148, 'IDENTITY_DB', `IS ${IS_FOR[src][1]}`);
+      el('path', { d: toD(IS.km(0)), ...kmStyle, 'stroke-dasharray': '6 4' }, envSrc);
+      txt(envSrc, 1060, 289, 'Key Manager', { 'text-anchor': 'middle', 'font-size': 10.5, fill: C.is });
+      const [kind, ver] = IS_FOR[src];
+      s.isSrc = nodeBox(envSrc, ix, iy, kind === 'IS-KM' ? 'WSO2 IS-KM' : 'WSO2 IS', ver, C.old, IS_SRC_STATUS, IS.nodeW);
+    }
+    s.srcAll = [...s.src.all, s.isSrc].filter(Boolean);
     s.freezeBadge = badge(layerTop, 690, 52, 190, '🔒 Changes frozen', C.warn);
 
     // Target environment
-    s.regionTgt = region(envTgt, 340, 40 + DY, 560, 262, `NEW · APIM ${TARGET}${depLabel}${isK8s() ? ' · KUBERNETES' : ''}`, C.neu);
+    s.regionTgt = region(envTgt, 340, 40 + DY, RW, 262, `NEW · APIM ${TARGET}${depLabel}${isK8s() ? ' · KUBERNETES' : ''}`, C.neu);
     s.interTgt = G.inter ? G.inter(DY).map((pts) => el('path', { d: toD(pts), ...interStyle, opacity: 0 }, envTgt)) : [];
     s.connTgtCp = G.cpDb(DY).map((pts) => drawable(envTgt, pts));
     s.connTgtTm = G.tmDb ? drawable(envTgt, G.tmDb(DY)) : null;
     s.connTgtGw = G.gwDb && gwUsesDb(TARGET) ? drawable(envTgt, G.gwDb(DY)) : null;
     s.tgt = buildNodes(envTgt, DY, TARGET, C.grey, TGT_STATUS);
+    // Target database slots: APIM's two, plus IS's own ones when the DBs are split (or IDENTITY_DB
+    // when only SHARED_DB is shared).
+    const slots = [[690, 'SHARED_DB'], [810, 'APIM_DB']];
+    if (isSplit()) slots.push([IS.S_X, 'SHARED_DB'], [IS.I_X, 'IDENTITY_DB']);
+    else if (isMerged() && KMDB === 'shared') slots.push([IS.I_X, 'IDENTITY_DB']);
     s.placeholders = el('g', {}, envTgt);
-    placeholder(s.placeholders, 690, 148 + DY);
-    placeholder(s.placeholders, 810, 148 + DY);
+    slots.forEach(([cx]) => placeholder(s.placeholders, cx, 148 + DY));
     // Fresh, empty databases used only to test the new setup before the real data arrives.
-    s.freshS = cylinder(envTgt, 690, 148 + DY, 'SHARED_DB', 'FRESH · EMPTY', null, DB_LOOK.fresh);
-    s.freshA = cylinder(envTgt, 810, 148 + DY, 'APIM_DB', 'FRESH · EMPTY', null, DB_LOOK.fresh);
-    [s.freshS, s.freshA].forEach((d) => {
+    s.fresh = slots.map(([cx, name]) => {
+      const d = cylinder(envTgt, cx, 148 + DY, name, 'FRESH · EMPTY', null, DB_LOOK.fresh);
       d.rows.forEach((r) => r.setAttribute('opacity', 0));
       d.schemaA.setAttribute('fill', C.fresh);
       d.schemaA.setAttribute('font-weight', 600);
+      return d;
     });
-    s.cfgBadge = badge(layerTop, 610, 326, 290, `⚙ ${TARGET}: migrated configs & customizations`, C.neu);
-    s.passBadge = badge(layerTop, 740, 392, 150, '✓ Tests passed', C.ok);
-    s.dbTgtS = cylinder(envTgt, 690, 148 + DY, 'SHARED_DB', `${src} copy`, SCENARIOS[scn].sharedAfter());
-    s.dbTgtA = cylinder(envTgt, 810, 148 + DY, 'APIM_DB', `${src} copy`);
+    s.cfgBadge = hasIs()
+      ? badge(layerTop, 610, 326, 430, `⚙ APIM ${TARGET} + IS ${isTgtVer()}: migrated configs & customizations`, C.neu)
+      : badge(layerTop, 610, 326, 290, `⚙ ${TARGET}: migrated configs & customizations`, C.neu);
+    s.passBadge = badge2(layerTop, 745, 387, 140, ['✓ Basic tests &', 'use cases passed'], C.ok);
+    s.dbTgtS = cylinder(envTgt, 690, 148 + DY, 'SHARED_DB', isMerged() ? 'shared copy' : `${src} copy`, SCENARIOS[scn].sharedAfter());
+    s.dbTgtA = cylinder(envTgt, 810, 148 + DY, 'APIM_DB', isMerged() && KMDB === 'both' ? 'shared copy' : `${src} copy`);
+    // where each target copy comes from (x offset from its source DB)
+    s.copies = [[s.dbTgtS, 0], [s.dbTgtA, 0]];
+    if (isSplit()) {
+      s.dbTgtIsS = cylinder(envTgt, IS.S_X, 148 + DY, 'SHARED_DB', 'IS copy', `IS ${isTgtVer()}`);
+      s.dbTgtIsI = cylinder(envTgt, IS.I_X, 148 + DY, 'IDENTITY_DB', 'IS copy', `IS ${isTgtVer()}`);
+      s.copies.push([s.dbTgtIsS, 690 - IS.S_X], [s.dbTgtIsI, KMDB === 'both' ? 810 - IS.I_X : 0]);
+    } else if (isMerged() && KMDB === 'shared') {
+      s.dbTgtIsI = cylinder(envTgt, IS.I_X, 148 + DY, 'IDENTITY_DB', 'IS copy', `IS ${isTgtVer()}`);
+      s.copies.push([s.dbTgtIsI, 0]);
+    }
 
-    // Migration script document
-    s.sqlDoc = el('g', {}, layerTop);
-    el('path', { d: 'M0,0 H54 L70,16 V86 H0 Z', fill: '#f4f1e8', stroke: '#c9c2ad' }, s.sqlDoc);
-    el('path', { d: 'M54,0 V16 H70', fill: '#dcd5c0', stroke: '#c9c2ad' }, s.sqlDoc);
-    txt(s.sqlDoc, 10, 30, 'SQL', { 'font-size': 16, 'font-weight': 700, fill: '#26406b' });
-    [42, 52, 62, 72].forEach((y, i) => el('rect', { x: 10, y, width: [48, 38, 44, 30][i], height: 4, rx: 2, fill: '#b9b3a2' }, s.sqlDoc));
-    txt(s.sqlDoc, 35, 104, 'migration.sql', { 'text-anchor': 'middle', 'font-size': 12, fill: C.text });
+    // Target IS node, its DB links and the Key Manager link
+    if (hasIs()) {
+      s.isTgtLabel = txt(envTgt, 925, 66 + DY, `KEY MANAGER · IS ${isTgtVer()}`, { 'font-size': 12, fill: C.is, 'letter-spacing': 1.5, 'font-weight': 600 });
+      const tgtLinks = isSplit() ? [IS.own(DY).S, IS.own(DY).I]
+        : [IS.common(DY).S, KMDB === 'both' ? IS.common(DY).A : IS.own(DY).I];
+      s.isTgtLinkPts = tgtLinks;
+      s.isTgtLinks = tgtLinks.map((pts) => drawable(envTgt, pts));
+      s.kmTgt = drawable(envTgt, IS.km(DY));
+      s.kmTgt.setAttribute('stroke', C.is);
+      s.kmTgt.setAttribute('stroke-opacity', 0.8);
+      s.kmTgtLabel = txt(envTgt, 1060, 289 + DY, 'Key Manager', { 'text-anchor': 'middle', 'font-size': 10.5, fill: C.is, opacity: 0 });
+      const [ix, iy] = IS.node(DY);
+      s.isTgt = nodeBox(envTgt, ix, iy, 'WSO2 IS', isTgtVer(), C.grey, IS_TGT_STATUS, IS.nodeW);
+    }
+    s.tgtAll = [...s.tgt.all, s.isTgt].filter(Boolean);
+
+    // Migration script documents
+    s.sqlDoc = sqlDocIcon(layerTop, 'migration.sql');
+    s.kmDoc = sqlDocIcon(layerTop, 'km-conversion.sql');
 
     // Migration clients (used by scenarios that need them)
     s.jarId = jarIcon(layerTop, 'Identity migration', 'org.wso2.carbon.is.migration-x.x.x.jar');
     const clientVer = scn === 'twostep' ? VIA : TARGET;
     s.jarApim = jarIcon(layerTop, 'API-M migration', `org.wso2.carbon.apimgt.migrate.client-${clientVer}.x.jar`);
     if (useTempNode(scn)) {
-      const vmLayer = el('g', {}, layerTop);
-      s.vmLinks = VM.links.map((pts) => drawable(vmLayer, pts));
       const title = scn === 'twostep' && !isK8s() ? 'Temporary node' : 'Temporary VM';
-      s.vm = nodeBox(vmLayer, VM.box[0], VM.box[1], title, clientVer, C.muted, VM_STATUS);
-      s.vm.rect.setAttribute('stroke-dasharray', '6 4');
-      // links belong to the VM's group so they fade with it. The group is only faded, never scaled:
-      // scaling a group whose bounding box changes (links drawing in) leaves GSAP with an offset.
-      s.vm.g.insertBefore(vmLayer.removeChild(s.vmLinks[0]), s.vm.g.firstChild);
-      s.vm.g.insertBefore(vmLayer.removeChild(s.vmLinks[1]), s.vm.g.firstChild);
-      s.vm.g.removeAttribute('filter');
+      s.vm = tempVm(layerTop, vmGeo(), vmGeo().links, title, clientVer, VM_STATUS);
+      s.vmLinks = s.vm.links;
     }
-    const term = s.vm ? VM.term : G.term, termW = s.vm ? 225 : 250;
+    if (hasIs()) {
+      s.jarIs = jarIcon(layerTop, 'IS migration', 'org.wso2.carbon.is.migration-x.x.x.jar (IS migration client)');
+      if (isK8s()) s.isVm = tempVm(layerTop, VM_IS.is, VM_IS.is.links(), 'Temporary VM', `IS ${isTgtVer()}`, IS_VM_STATUS);
+      s.termIs = terminal(layerTop, isK8s() ? VM_IS.is.term : IS.term, '-Dmigrate -Dcomponent=identity', 225);
+    }
+    const term = s.vm ? vmGeo().term : G.term, termW = s.vm ? (hasIs() ? 240 : 225) : 250;
     s.termId = terminal(layerTop, term, '-Dmigrate -Dcomponent=identity', termW);
     s.termApim = terminal(layerTop, term, scn === 'twostep' || TARGET === VIA
       ? [`-Dmigrate -DmigrateFromVersion=${src}`, `-DmigratedVersion=${VIA}`]
@@ -791,23 +999,27 @@
     [[C.packet, 'API call (client → gateway → backend)'], [C.db, 'Data change (new API, app, subscription)'],
      [C.bad, 'API call rejected']].forEach(([color, label], i) => {
       const x = [40, 310, 590][i];
-      el('circle', { cx: x, cy: 670, r: 5, fill: color }, lg);
-      txt(lg, x + 12, 674.5, label, { 'font-size': 12, fill: C.muted });
+      el('circle', { cx: x, cy: H - 20, r: 5, fill: color }, lg);
+      txt(lg, x + 12, H - 15.5, label, { 'font-size': 12, fill: C.muted });
     });
     if (isDist()) {
-      el('line', { x1: 734, y1: 670, x2: 752, y2: 670, ...interStyle }, lg);
-      txt(lg, 760, 674.5, 'Node-to-node link', { 'font-size': 12, fill: C.muted });
+      el('line', { x1: 734, y1: H - 20, x2: 752, y2: H - 20, ...interStyle }, lg);
+      txt(lg, 760, H - 15.5, 'Node-to-node link', { 'font-size': 12, fill: C.muted });
     }
-    el('rect', { x: 914, y: 663, width: 14, height: 14, rx: 3, fill: DB_LOOK.fresh.body, stroke: C.fresh }, lg);
-    txt(lg, 936, 674.5, 'Fresh test database', { 'font-size': 12, fill: C.muted });
+    el('rect', { x: 914, y: H - 27, width: 14, height: 14, rx: 3, fill: DB_LOOK.fresh.body, stroke: C.fresh }, lg);
+    txt(lg, 936, H - 15.5, 'Fresh test database', { 'font-size': 12, fill: C.muted });
+    if (hasIs()) {
+      el('line', { x1: 1100, y1: H - 20, x2: 1122, y2: H - 20, ...kmStyle, 'stroke-dasharray': '6 4' }, lg);
+      txt(lg, 1130, H - 15.5, 'Key Manager link (IS ↔ APIM)', { 'font-size': 12, fill: C.muted });
+    }
 
     // Initial state
-    gsap.set([s.regionTgt, ...s.tgt.all.map((b) => b.g), s.placeholders, s.linkTgt, s.lbDown, s.freezeBadge,
-      s.termId, s.termApim], { opacity: 0 });
-    gsap.set(s.sqlDoc, { x: 1230, y: 250, opacity: 0 });
-    gsap.set([s.jarId, s.jarApim], { x: 1230, y: 420, opacity: 0 });
-    if (s.vm) gsap.set(s.vm.g, { opacity: 0 });
-    gsap.set([s.freshS.g, s.freshA.g, s.cfgBadge, s.passBadge], { opacity: 0 });
+    gsap.set([s.regionTgt, s.isTgtLabel, ...s.tgtAll.map((b) => b.g), s.placeholders, s.linkTgt, s.lbDown, s.freezeBadge,
+      s.termId, s.termApim, s.termIs].filter(Boolean), { opacity: 0 });
+    gsap.set([s.sqlDoc, s.kmDoc], { x: FLY_X(), y: 250, opacity: 0 });
+    gsap.set([s.jarId, s.jarApim, s.jarIs].filter(Boolean), { x: FLY_X(), y: 420, opacity: 0 });
+    gsap.set([s.vm, s.isVm].filter(Boolean).map((v) => v.g), { opacity: 0 });
+    gsap.set([...s.fresh.map((d) => d.g), s.cfgBadge, s.passBadge], { opacity: 0 });
     gsap.set(s.lbArrow, { rotation: -38, svgOrigin: '230 376' });
     return s;
   }
@@ -824,7 +1036,7 @@
 
   // Fly the SQL document in from the right and drop it into the database at cx.
   function flyDoc(tl, doc, cx) {
-    tl.fromTo(doc, { opacity: 0, x: 1230, y: 250, scale: 1 },
+    tl.fromTo(doc, { opacity: 0, x: FLY_X(), y: 250, scale: 1 },
       { opacity: 1, x: cx - 35, y: 360, duration: 1.3, ease: 'power2.out' });
     tl.to(doc, { y: 480, scale: 0.3, opacity: 0, transformOrigin: '50% 100%', duration: 0.6, ease: 'power2.in' }, '+=0.7');
   }
@@ -849,6 +1061,10 @@
     paths.filter(Boolean).forEach((p, i) =>
       tl.to(p, { attr: { 'stroke-dashoffset': 0 }, duration: 0.8, ease: 'none' }, i === 0 ? pos : '<0.1'));
   }
+  function undraw(tl, paths, pos) {
+    paths.filter(Boolean).forEach((p, i) =>
+      tl.to(p, { attr: { 'stroke-dashoffset': p.getTotalLength() }, duration: 0.5, ease: 'none' }, i === 0 ? pos : '<'));
+  }
 
   // Bring a target node to life: border and version turn blue, status changes.
   function activate(tl, box, statusKey, pos) {
@@ -860,13 +1076,15 @@
   // Copy a migration client JAR into the node that runs migrations (AIO node or Control Plane),
   // start it in migration mode, let it change the databases, then stop it and remove the JAR.
   // Adds labels <name>Run / <name>Done; the traffic loop shows DB writes between them.
-  function runClient(tl, s, jar, term, statusKey, name, changes) {
-    const { land, into } = s.vm ? VM.jar : s.G.jar;
-    const node = s.vm || s.tgt.cp;
-    tl.fromTo(jar, { opacity: 0, x: 1230, y: 420, scale: 1 },
+  // opts.node / opts.jar / opts.links override where the client runs (used for the IS migration).
+  function runClient(tl, s, jar, term, statusKey, name, changes, opts = {}) {
+    const { land, into } = opts.jar || (s.vm ? vmGeo().jar : s.G.jar);
+    const node = opts.node || s.vm || s.tgt.cp;
+    const links = 'links' in opts ? opts.links : (s.vm ? null : s.connTgtCp);
+    tl.fromTo(jar, { opacity: 0, x: FLY_X(), y: 420, scale: 1 },
       { opacity: 1, x: land[0], y: land[1], duration: 1.2, ease: 'power2.out' });
     tl.to(jar, { x: into[0], y: into[1], scale: 0.35, opacity: 0, transformOrigin: '50% 50%', duration: 0.6, ease: 'power2.in' }, '+=0.5');
-    if (!s.vm) draw(tl, s.connTgtCp);
+    if (links) draw(tl, links);
     tl.to(term, { opacity: 1, duration: 0.4 }, '<');
     tl.to(node.rect, { attr: { stroke: C.warn }, duration: 0.4 }, '<');
     showStatus(tl, node, statusKey, '<');
@@ -883,37 +1101,112 @@
     tl.to(jar, { opacity: 0, y: land[1] - 40, duration: 0.5 });
   }
 
+  // IS migration: on the target IS node, or on a temporary IS VM for Kubernetes targets.
+  function isTimeline(tl, s) {
+    tl.addLabel('ismig');
+    if (s.isVm) {
+      tl.fromTo(s.isVm.g, { opacity: 0 }, { opacity: 1, duration: 0.8 });
+      draw(tl, s.isVm.links, '+=0.2');
+    }
+    runClient(tl, s, s.jarIs, s.termIs, 'migIs', 'ismig', () => {
+      if (isSplit()) {
+        dbUpdate(tl, s.dbTgtIsS, { rows: [0, 1], swap: true });
+        dbUpdate(tl, s.dbTgtIsI, { rows: [0, 2], add: true, swap: true }, '<');
+      } else {
+        // shared DBs: the IS migration also changes API Manager's databases
+        dbUpdate(tl, s.dbTgtS, { rows: [0] });
+        if (KMDB === 'both') dbUpdate(tl, s.dbTgtA, { rows: [0] }, '<');
+        else dbUpdate(tl, s.dbTgtIsI, { rows: [0, 1], add: true, swap: true }, '<');
+      }
+    }, {
+      node: s.isVm || s.isTgt,
+      jar: s.isVm ? VM_IS.is.jar : IS.jar,
+      links: s.isVm ? null : s.isTgtLinks,
+    });
+    if (s.isVm) {
+      undraw(tl, s.isVm.links, '+=0.3');
+      tl.to(s.isVm.g, { opacity: 0, duration: 0.7 });
+    }
+    wait(tl);
+  }
+
+  // Target 4.2.0 with IS 6.1.0: only the API Manager component migration runs.
+  function mergedApimTimeline(tl, s) {
+    if (s.vm) {
+      tl.addLabel('tempvm');
+      tl.fromTo(s.vm.g, { opacity: 0 }, { opacity: 1, duration: 0.8 });
+      draw(tl, s.vmLinks, '+=0.2');
+      wait(tl);
+    }
+    tl.addLabel('apimig');
+    runClient(tl, s, s.jarApim, s.termApim, 'migApim', 'apimig', () => {
+      dbUpdate(tl, s.dbTgtA, { rows: [1, 2], add: true, swap: true });
+      dbUpdate(tl, s.dbTgtS, { rows: [1, 2], add: true, swap: true }, '<');
+    });
+    wait(tl);
+    if (s.vm) {
+      tl.addLabel('removevm');
+      undraw(tl, s.vmLinks);
+      tl.to(s.vm.g, { opacity: 0, duration: 0.7 });
+      wait(tl, 2.4);
+    }
+  }
+
+  // Target 4.3.0+: connect IS 7.x as a third-party KM, then stop both and convert it to resident.
+  function kmConversionTimeline(tl, s) {
+    const apim = s.tgt.all;
+    tl.addLabel('connectkm');
+    draw(tl, [...s.connTgtCp, s.connTgtTm, s.connTgtGw, ...s.isTgtLinks]);
+    apim.forEach((b, i) => activate(tl, b, 'kmSetup', i ? '<0.2' : undefined));
+    activate(tl, s.isTgt, 'kmSetup', '<0.2');
+    draw(tl, [s.kmTgt], '+=0.3');
+    tl.to(s.kmTgtLabel, { opacity: 1, duration: 0.4 }, '<');
+    wait(tl);
+
+    tl.addLabel('convert');
+    s.tgtAll.forEach((b, i) => {
+      showStatus(tl, b, 'kmStop', i ? '<' : undefined);
+      tl.to(b.rect, { attr: { stroke: C.grey }, duration: 0.4 }, '<');
+    });
+    flyDoc(tl, s.kmDoc, 810);
+    dbUpdate(tl, s.dbTgtA, { rows: [0, 1, 2] });
+    wait(tl);
+  }
+
   function buildTimeline(scn, mode, s) {
     const tl = gsap.timeline({ paused: true, onComplete: () => setPlayLabel() });
-    const srcBoxes = s.src.all, tgtBoxes = s.tgt.all;
+    const srcBoxes = s.srcAll, tgtBoxes = s.tgtAll;
 
     tl.addLabel('running', 0);
     wait(tl, 4);
 
     tl.addLabel('build');
-    tl.to(s.regionTgt, { opacity: 1, duration: 0.8 });
-    tl.fromTo(tgtBoxes.map((b) => b.g), { opacity: 0, scale: 0.85 },
-      { opacity: 1, scale: 1, transformOrigin: '50% 50%', duration: 0.8, ease: 'back.out(1.6)', stagger: 0.15 }, '<0.2');
+    tl.to([s.regionTgt, s.isTgtLabel].filter(Boolean), { opacity: 1, duration: 0.8 });
+    // slide in rather than scale: a scale tween leaves GSAP with an origin offset, which pulls
+    // the boxes away from their connector lines
+    tl.fromTo(tgtBoxes.map((b) => b.g), { opacity: 0, y: 14 },
+      { opacity: 1, y: 0, duration: 0.8, ease: 'power2.out', stagger: 0.15 }, '<0.2');
     tl.to(s.placeholders, { opacity: 1, duration: 0.6 });
     wait(tl);
 
     // Test the new setup with migrated configs and fresh, empty databases, then reset it.
     tl.addLabel('fresh');
-    const freshLinks = [...s.connTgtCp, s.connTgtTm, s.connTgtGw].filter(Boolean);
+    const freshLinks = [...s.connTgtCp, s.connTgtTm, s.connTgtGw, ...(s.isTgtLinks || [])].filter(Boolean);
+    const freshDbs = s.fresh.map((d) => d.g);
     tl.fromTo(s.cfgBadge, { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' });
     tl.to(s.placeholders, { opacity: 0, duration: 0.4 }, '+=0.3');
-    tl.to([s.freshS.g, s.freshA.g], { opacity: 1, duration: 0.6, stagger: 0.2 }, '<');
+    tl.to(freshDbs, { opacity: 1, duration: 0.6, stagger: 0.2 }, '<');
     tl.set(freshLinks, { attr: { stroke: C.fresh } }, '<');
     draw(tl, freshLinks);
-    s.tgt.all.forEach((b, i) => activate(tl, b, 'freshTest', i ? '<0.2' : undefined));
+    tgtBoxes.forEach((b, i) => activate(tl, b, 'freshTest', i ? '<0.2' : undefined));
+    if (s.kmTgt) { draw(tl, [s.kmTgt], '<'); tl.to(s.kmTgtLabel, { opacity: 1, duration: 0.4 }, '<'); }
     if (s.interTgt.length) tl.to(s.interTgt, { opacity: 1, duration: 0.4 }, '<');
     tl.addLabel('freshRun');
     wait(tl, 2.4);
-    tl.fromTo(s.passBadge, { opacity: 0, scale: 0.8 },
-      { opacity: 1, scale: 1, transformOrigin: '50% 50%', duration: 0.5, ease: 'back.out(2)' });
+    tl.fromTo(s.passBadge, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(2)' });
     wait(tl, 1.2);
     tl.addLabel('freshDone');
-    s.tgt.all.forEach((b, i) => {
+    tgtBoxes.forEach((b, i) => {
       showStatus(tl, b, 'ready', i ? '<' : undefined);
       tl.to(b.rect, { attr: { stroke: C.grey }, duration: 0.4 }, '<');
       tl.to(b.ver, { attr: { fill: C.grey }, duration: 0.4 }, '<');
@@ -921,8 +1214,9 @@
     freshLinks.forEach((p, i) =>
       tl.to(p, { attr: { 'stroke-dashoffset': p.getTotalLength() }, duration: 0.5, ease: 'none' }, i ? '<' : '+=0.2'));
     if (s.interTgt.length) tl.to(s.interTgt, { opacity: 0, duration: 0.4 }, '<');
+    if (s.kmTgt) { undraw(tl, [s.kmTgt], '<'); tl.to(s.kmTgtLabel, { opacity: 0, duration: 0.4 }, '<'); }
     tl.set(freshLinks, { attr: { stroke: C.db } });
-    tl.to([s.freshS.g, s.freshA.g], { opacity: 0, duration: 0.6 }, '+=0.2');
+    tl.to(freshDbs, { opacity: 0, duration: 0.6 }, '+=0.2');
     tl.to(s.placeholders, { opacity: 1, duration: 0.5 }, '<0.3');
     tl.to(s.passBadge, { opacity: 0, duration: 0.4 }, '<');
     wait(tl, 1.5);
@@ -939,21 +1233,24 @@
       tl.to([s.linkSrc, s.laneSrc], { opacity: 0.15, duration: 0.5 }, '<');
     } else {
       tl.addLabel('freeze');
-      tl.fromTo(s.freezeBadge, { opacity: 0, scale: 0.8 },
-        { opacity: 1, scale: 1, transformOrigin: '50% 50%', duration: 0.5, ease: 'back.out(2)' });
-      tl.to(s.connSrc, { opacity: 0.25, duration: 0.4 }, '<');
+      tl.fromTo(s.freezeBadge, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(2)' });
+      tl.to([...s.connSrc, ...(s.isSrcLinkEls || [])], { opacity: 0.25, duration: 0.4 }, '<');
       showStatus(tl, s.src.cp, 'frozen', '<');
+      if (s.isSrc) showStatus(tl, s.isSrc, 'frozen', '<');
     }
     wait(tl);
 
     tl.addLabel('copy');
-    tl.to([s.dbSrcS.halo, s.dbSrcA.halo], { opacity: 0.55, duration: 0.4, yoyo: true, repeat: 1 });
-    tl.fromTo(s.dbTgtS.g, { opacity: 0, y: -DY }, { opacity: 1, y: 0, duration: 1.8, ease: 'power2.inOut' });
-    tl.fromTo(s.dbTgtA.g, { opacity: 0, y: -DY }, { opacity: 1, y: 0, duration: 1.8, ease: 'power2.inOut' }, '<0.4');
+    tl.to([s.dbSrcS, s.dbSrcA, s.dbSrcIsI].filter(Boolean).map((d) => d.halo), { opacity: 0.55, duration: 0.4, yoyo: true, repeat: 1 });
+    s.copies.forEach(([db, dx], i) => tl.fromTo(db.g, { opacity: 0, x: dx, y: -DY },
+      { opacity: 1, x: 0, y: 0, duration: 1.8, ease: 'power2.inOut' }, i ? '<0.4' : undefined));
     tl.to(s.placeholders, { opacity: 0, duration: 0.4 }, '-=0.5');
     wait(tl);
 
-    SCENARIOS[scn].timeline(tl, s);
+    if (hasIs()) isTimeline(tl, s);
+    if (isMerged()) mergedApimTimeline(tl, s);
+    else SCENARIOS[scn].timeline(tl, s);
+    if (isSplit()) kmConversionTimeline(tl, s);
 
     // Start order: AIO node, or Control Plane -> Traffic Manager -> Gateway.
     tl.addLabel('start');
@@ -966,6 +1263,12 @@
       activate(tl, s.tgt.gw, 'tested', s.connTgtGw ? undefined : '+=0.4');
     }
     if (s.interTgt.length) tl.to(s.interTgt, { opacity: 1, duration: 0.5 }, '<');
+    if (s.isTgt) {
+      draw(tl, s.isTgtLinks, '+=0.3');
+      activate(tl, s.isTgt, 'tested');
+      draw(tl, [s.kmTgt], '<');
+      tl.to(s.kmTgtLabel, { opacity: 1, duration: 0.4 }, '<');
+    }
     tl.to(s.laneTgt, { opacity: 0.5, duration: 0.5 }, '<');
     wait(tl);
 
@@ -990,7 +1293,7 @@
   function stateAt(mode, tl, t) {
     const L = tl.labels;
     const switched = t >= L.switch + 0.3;
-    const migrating = ['identity', 'apimig'].some((n) => L[n + 'Run'] !== undefined && t >= L[n + 'Run'] && t < L[n + 'Done']);
+    const migrating = ['identity', 'apimig', 'ismig'].find((n) => L[n + 'Run'] !== undefined && t >= L[n + 'Run'] && t < L[n + 'Done']) || null;
     let st;
     if (mode === 'downtime') {
       const down = t >= L.stop + 0.3 && !switched;
@@ -1043,6 +1346,7 @@
     capTitle.textContent = st.title;
     capText.innerHTML = st.text; // step texts are static strings defined above
     stepBtns.forEach((b, j) => b.classList.toggle('active', j === i));
+    if (nar.on) narStart(i);
   }
   let lastPanel = '';
   function renderPanel(st) {
@@ -1056,10 +1360,12 @@
     S.stBy.setAttribute('fill', st.route === 'src' ? C.old : st.route === 'tgt' ? C.neu : C.muted);
   }
   function setPlayLabel() {
-    btnPlay.textContent = tl.progress() >= 1 ? '⟲ Replay' : tl.paused() ? '▶ Play' : '❚❚ Pause';
+    btnPlay.textContent = tl.progress() >= 1 ? '⟲ Replay' : playing() ? '❚❚ Pause' : '▶ Play';
   }
   function goTo(i) {
     i = Math.max(0, Math.min(STEPS.length - 1, i));
+    narReset();
+    shownStep = -1; // re-read the step even if it is the one already shown
     tl.seek(STEPS[i].label, false);
     renderCaption();
     setPlayLabel();
@@ -1069,11 +1375,13 @@
     scn = newScn;
     mode = newMode;
     clearTraffic();
+    narReset();
     if (tl) tl.kill();
     S = buildScene(scn, mode);
     R = buildRoutes(S);
     tl = buildTimeline(scn, mode, S);
     tl.timeScale(speed);
+    tl.eventCallback('onUpdate', narHold);
     STEPS = stepsFor(scn, mode);
     shownStep = -1;
     lastPanel = '';
@@ -1081,6 +1389,9 @@
     document.getElementById('chip').textContent = SCENARIOS[scn].name;
     document.getElementById('chipDep').textContent = isDist() ? 'Distributed (generalized)' : 'All-in-one';
     document.getElementById('chipPlat').textContent = isK8s() ? 'Target on Kubernetes' : 'Target on VMs';
+    const chipKm = document.getElementById('chipKm');
+    chipKm.hidden = !hasIs();
+    chipKm.textContent = hasIs() ? `IS as KM · ${KMDB === 'both' ? 'SHARED_DB + APIM_DB shared' : 'SHARED_DB shared'}` : '';
     document.getElementById('subtitle').textContent = MODE_TEXT[mode].subtitle(SRC);
     document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
     stepsEl.innerHTML = '';
@@ -1111,14 +1422,213 @@
     };
   });
   btnPlay.onclick = () => {
-    if (tl.progress() >= 1) tl.restart();
-    else tl.paused(!tl.paused());
+    if (tl.progress() >= 1) { narReset(); shownStep = -1; tl.restart(); }
+    else if (playing()) { tl.pause(); narPause(); }
+    else { narResume(); if (!nar.holding) tl.play(); }
     setPlayLabel();
   };
-  document.getElementById('btnRestart').onclick = () => { clearTraffic(); tl.restart(); setPlayLabel(); };
+  document.getElementById('btnRestart').onclick = () => { clearTraffic(); narReset(); shownStep = -1; tl.restart(); setPlayLabel(); };
   document.getElementById('btnPrev').onclick = () => goTo(currentStep() - 1);
   document.getElementById('btnNext').onclick = () => goTo(currentStep() + 1);
-  document.getElementById('speed').onchange = (e) => { speed = +e.target.value; tl.timeScale(speed); };
+  document.getElementById('speed').onchange = (e) => {
+    speed = +e.target.value;
+    if (narActive()) narPace(); else tl.timeScale(speed);
+  };
+
+  // ---------- narration ----------
+  // Reads each step aloud with the browser's own speech engine (no files, works offline and
+  // in the exported customer page). While it is on, the voice sets the pace: the animation of a
+  // step is slowed so it ends about when the voice does, and if the voice is still talking at
+  // the next step it waits there. Speech is queued one sentence at a time because Chrome cuts
+  // off long utterances, and pause/resume restarts the current sentence because
+  // speechSynthesis.pause() is unreliable across browsers.
+  const synth = window.speechSynthesis;
+  const btnNarrate = document.getElementById('btnNarrate');
+  const selVoice = document.getElementById('voice');
+  const nar = {
+    on: false, step: -1, parts: [], idx: 0, gen: 0, holdAt: null, holding: false, paused: false,
+    wps: 2.6, // spoken words per second at rate 1; recalibrated from each sentence
+    voice: null, timer: 0,
+  };
+  const words = (t) => t.split(/\s+/).filter(Boolean).length;
+  const narRate = () => Math.max(0.5, Math.min(2, speed));
+  const narActive = () => nar.on && nar.idx < nar.parts.length;
+  function playing() { return nar.holding ? !nar.paused : !tl.paused(); }
+
+  // Captions are written to be read; make them sound right when spoken.
+  function spokenText(st) {
+    const flags = (c) => 'the options ' + c.trim().split(/\s+/).map((f) => {
+      const m = f.match(/^-D(\w+)(?:=(.+))?$/);
+      if (!m) return f;
+      const name = m[1].replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+      return m[2] ? `${name} set to ${m[2]}` : name;
+    }).join(', ');
+    return `${st.title}. ${st.text}`
+      .replace(/<code>(.*?)<\/code>/g, (_, c) => flags(c))
+      .replace(/<[^>]+>/g, '')
+      .replace(/→/g, ' to ')
+      .replace(/\s\/\s/g, ' or ')
+      .replace(/\bAPIM_DB\b/g, 'A P I M D B')
+      .replace(/\b([A-Z]+)_DB\b/g, (_, w) => `${w.toLowerCase()} D B`)
+      .replace(/\bAPI-M\b|\bAPIM\b/g, 'A P I M')
+      .replace(/\bIS\b/g, 'I S')
+      .replace(/\bSQL\b/g, 'S Q L')
+      .replace(/\bJAR\b/g, 'jar')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Slow the animation so what is left of this step lasts as long as what is left to say.
+  // Never faster than the chosen speed.
+  function narPace() {
+    if (!narActive()) { tl.timeScale(speed); return; }
+    const end = nar.holdAt ?? tl.duration();
+    const anim = Math.max(0, end - tl.time());
+    let left = 0;
+    for (let k = nar.idx; k < nar.parts.length; k++) left += words(nar.parts[k]);
+    const talk = left / (nar.wps * narRate());
+    tl.timeScale(talk > 0.2 ? Math.max(0.05, Math.min(speed, anim / talk)) : speed);
+  }
+  // Called on every timeline update: wait just before the next step while the voice is talking.
+  function narHold() {
+    if (!narActive() || nar.holdAt == null || nar.holding) return;
+    if (tl.time() >= nar.holdAt - 0.02) {
+      nar.holding = true;
+      tl.pause(nar.holdAt - 0.02);
+    }
+  }
+  function narSpeak(g) {
+    clearTimeout(nar.timer);
+    if (g !== nar.gen || nar.paused) return;
+    if (nar.idx >= nar.parts.length) { narDone(); return; }
+    narPace();
+    const text = nar.parts[nar.idx], n = words(text), rate = narRate();
+    const u = new SpeechSynthesisUtterance(text);
+    try { if (nar.voice) { u.voice = nar.voice; u.lang = nar.voice.lang; } } catch (e) { /* default voice */ }
+    u.rate = rate;
+    let t0 = 0;
+    const next = () => {
+      if (g !== nar.gen) return;
+      clearTimeout(nar.timer);
+      if (t0 && n >= 4) {
+        const wps = n / ((performance.now() - t0) / 1000) / rate;
+        if (wps > 0.8 && wps < 6) nar.wps = 0.7 * nar.wps + 0.3 * wps;
+      }
+      nar.idx++;
+      narSpeak(g);
+    };
+    u.onstart = () => { t0 = performance.now(); };
+    u.onend = next;
+    u.onerror = next;
+    nar.utter = u; // keep a reference: Chrome drops end events of collected utterances
+    // watchdog in case the engine never reports the end
+    nar.timer = setTimeout(next, (n / (nar.wps * rate)) * 2500 + 4000);
+    try { synth.speak(u); } catch (e) { next(); }
+  }
+  function narDone() {
+    tl.timeScale(speed);
+    if (nar.holding) {
+      nar.holding = false;
+      if (!nar.paused) tl.play();
+      setPlayLabel();
+    }
+  }
+  function narStart(i) {
+    narReset();
+    const st = STEPS[i];
+    nar.step = i;
+    // whole sentences; long ones are also split at ; and : (Chrome stops after ~15 s of speech)
+    nar.parts = spokenText(st).split(/(?<=[.!?])\s+/)
+      .flatMap((x) => (words(x) > 25 ? x.split(/(?<=[;:])\s+/) : [x])).filter(Boolean);
+    nar.holdAt = STEPS[i + 1] ? tl.labels[STEPS[i + 1].label] : null;
+    nar.paused = tl.paused();
+    narPace();
+    const g = nar.gen;
+    // Chrome may drop a speak() issued right after cancel()
+    if (!nar.paused) setTimeout(() => narSpeak(g), 60);
+  }
+  // Stop talking and forget the current step. If the timeline was waiting for the voice,
+  // let it go on (unless the viewer paused).
+  function narReset() {
+    nar.gen++;
+    clearTimeout(nar.timer);
+    if (synth) synth.cancel();
+    nar.parts = [];
+    nar.idx = 0;
+    nar.holdAt = null;
+    nar.step = -1;
+    if (nar.holding) {
+      nar.holding = false;
+      if (!nar.paused && tl) tl.play();
+    }
+    if (tl) tl.timeScale(speed);
+  }
+  function narPause() {
+    if (!nar.on) return;
+    nar.paused = true;
+    nar.gen++;
+    clearTimeout(nar.timer);
+    synth.cancel();
+  }
+  function narResume() {
+    if (!nar.on) return;
+    nar.paused = false;
+    if (narActive()) {
+      const g = nar.gen;
+      setTimeout(() => narSpeak(g), 60); // restarts the current sentence
+    }
+  }
+
+  function voiceScore(v) {
+    let sc = 0;
+    if (/^en[-_]US/i.test(v.lang)) sc += 3; else if (/^en[-_]GB/i.test(v.lang)) sc += 2;
+    if (/natural|neural|premium|enhanced/i.test(v.name)) sc += 6;
+    if (/^Google/i.test(v.name)) sc += 4;
+    if (/Samantha|Daniel|Karen|Serena|Ava|Allison/i.test(v.name)) sc += 2;
+    if (v.localService === false) sc += 1;
+    return sc;
+  }
+  function fillVoices() {
+    const list = synth.getVoices().filter((v) => /^en/i.test(v.lang))
+      .sort((a, b) => voiceScore(b) - voiceScore(a) || a.name.localeCompare(b.name));
+    if (!list.length) return;
+    let saved = '';
+    try { saved = localStorage.getItem('apimMigVoice') || ''; } catch (e) { /* no storage */ }
+    selVoice.innerHTML = '';
+    list.forEach((v) => {
+      const o = document.createElement('option');
+      o.value = v.name;
+      o.textContent = `${v.name} (${v.lang})`;
+      selVoice.appendChild(o);
+    });
+    const pick = list.find((v) => v.name === saved) || list[0];
+    selVoice.value = pick.name;
+    nar.voice = pick;
+  }
+  if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
+    btnNarrate.hidden = true;
+  } else {
+    fillVoices();
+    synth.addEventListener?.('voiceschanged', fillVoices);
+    selVoice.onchange = () => {
+      nar.voice = synth.getVoices().find((v) => v.name === selVoice.value) || null;
+      try { localStorage.setItem('apimMigVoice', selVoice.value); } catch (e) { /* no storage */ }
+      if (nar.on) goTo(currentStep()); // hear the new voice from the start of this step
+    };
+    btnNarrate.onclick = () => {
+      nar.on = !nar.on;
+      btnNarrate.setAttribute('aria-pressed', String(nar.on));
+      selVoice.hidden = !nar.on || !selVoice.options.length;
+      if (nar.on) {
+        // start the current step again so the voice and the animation line up
+        if (tl.progress() >= 1) tl.pause();
+        goTo(currentStep());
+      } else {
+        narReset();
+        setPlayLabel();
+      }
+    };
+  }
 
   // ---------- live traffic ----------
   function polyline(pts) {
@@ -1148,8 +1658,11 @@
       toNode: { src: polyline(linkPts(G, 0)), tgt: polyline(linkPts(G, DY)) },
       entry: { src: G.entry(0), tgt: G.entry(DY) },
       toBackend: { src: polyline(s.laneSrcPts), tgt: polyline(s.laneTgtPts) },
-      backendPort: { src: [960, BACKEND_PORT.src], tgt: [960, BACKEND_PORT.tgt] },
-      toDb: { src: G.cpDb(0).map(polyline), tgt: G.cpDb(DY).map(polyline), vm: VM.links.map(polyline) },
+      backendPort: { src: [BE_X(), BACKEND_PORT.src], tgt: [BE_X(), BACKEND_PORT.tgt] },
+      toDb: { src: G.cpDb(0).map(polyline), tgt: G.cpDb(DY).map(polyline), vm: vmGeo().links.map(polyline) },
+      // IS -> its databases (normal changes), and where the IS migration writes
+      isWr: hasIs() ? { src: s.isSrcLinkPts.map(polyline), tgt: s.isTgtLinkPts.map(polyline) } : null,
+      isMig: hasIs() ? (s.isVm ? VM_IS.is.links() : s.isTgtLinkPts).map(polyline) : null,
     };
   }
 
@@ -1187,6 +1700,7 @@
       });
     });
   }
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   function spawnWrite(target, speedPx = 170, color = C.db) {
     const k = Math.random() < 0.5 ? 0 : 1;
     addPacket(R.toDb[target][k], color, 4, speedPx, null);
@@ -1202,7 +1716,13 @@
     accMig += dt;
     const st = now();
     if (accReq > 0.42) { accReq = 0; spawnRequest(); }
-    if (accWrite > 1.5) { accWrite = 0; if (st.writes) spawnWrite(st.writes); }
+    if (accWrite > 1.5) {
+      accWrite = 0;
+      if (st.writes) {
+        spawnWrite(st.writes);
+        if (R.isWr && Math.random() < 0.6) addPacket(pick(R.isWr[st.writes]), C.db, 4, 170, null); // IS changes
+      }
+    }
     // test data on the new setup while it runs against fresh DBs
     accTest += dt;
     if (accTest > 0.7) {
@@ -1210,10 +1730,15 @@
       if (st.freshTest) {
         // no calls go to the backend during this test; only test data in the fresh DBs
         spawnWrite('tgt', 170, C.fresh);
+        if (R.isWr) addPacket(pick(R.isWr.tgt), C.fresh, 4, 170, null);
       }
     }
     // migration clients rewrite data in both target databases
-    if (accMig > 0.12) { accMig = 0; if (st.migrating) spawnWrite(S.vm ? 'vm' : 'tgt', 260); }
+    if (accMig > 0.12) {
+      accMig = 0;
+      if (st.migrating === 'ismig') addPacket(pick(R.isMig), C.db, 4, 260, null);
+      else if (st.migrating) spawnWrite(S.vm ? 'vm' : 'tgt', 260);
+    }
     const current = packets;
     const next = [];
     packets = []; // onArrive() adds the next hop here
@@ -1254,7 +1779,17 @@
     selTgt.value = opts.includes(keep) ? keep : opts[opts.length - 1];
     describe();
   }
+  const kmField = document.getElementById('kmField');
+  const kmdbField = document.getElementById('kmdbField');
+  function updateKmField() {
+    const allowed = kmAllowed(selSrc.value);
+    kmField.hidden = !allowed;
+    kmdbField.hidden = !allowed || radio('km') !== 'is';
+    document.getElementById('kmHint').textContent = allowed
+      ? `Current: ${isNameFor(selSrc.value)}. Target: IS ${isTgtVerFor(selTgt.value)}.` : '';
+  }
   function describe() {
+    updateKmField();
     const st = strategyFor(selSrc.value, selTgt.value);
     approachEl.classList.toggle('bad', !st);
     btnGo.disabled = !st;
@@ -1262,31 +1797,41 @@
     const vmNote = !st || !k8s || st === 'twostep' ? ''
       : st === 'client' ? ' The target runs on Kubernetes, so the migration clients run on a temporary all-in-one VM that is removed afterwards.'
       : ' No temporary VM is needed: only a SQL script runs.';
+    const withIs = st && kmAllowed(selSrc.value) && radio('km') === 'is';
+    const isNote = !withIs ? ''
+      : selTgt.value === VIA
+        ? ` <strong>IS as Key Manager:</strong> ${isNameFor(selSrc.value)} → IS 6.1.0. Both products are migrated together on the shared databases: the IS migration first, then only the API Manager component migration.`
+        : ` <strong>IS as Key Manager:</strong> ${isNameFor(selSrc.value)} → IS 7.x. The databases are split per product, IS is migrated on its own, connected as a third-party Key Manager, then converted to work like the resident Key Manager.`;
     approachEl.innerHTML = st
-      ? `<strong>${SCENARIOS[st].name}.</strong> ${SCENARIOS[st].summary()}${vmNote}`
+      ? `<strong>${SCENARIOS[st].name}.</strong> ${SCENARIOS[st].summary()}${vmNote}${isNote}`
       : 'There is no documented direct path between these versions.';
   }
   selSrc.onchange = fillTargets;
   selTgt.onchange = describe;
-  document.querySelectorAll('input[name="plat"]').forEach((r) => { r.onchange = describe; });
+  document.querySelectorAll('input[name="plat"], input[name="km"], input[name="kmdb"]').forEach((r) => { r.onchange = describe; });
 
   function syncUrl() {
-    const q = new URLSearchParams({ src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, downtime: mode === 'downtime' ? 'yes' : 'no' });
+    if (LOCK) return;
+    const q = new URLSearchParams({ src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, km: KM, kmdb: KMDB, downtime: mode === 'downtime' ? 'yes' : 'no' });
     history.replaceState(null, '', '?' + q);
   }
-  function start(src, tgt, dep, plat, downtime, opts = {}) {
+  function start(src, tgt, dep, plat, km, kmdb, downtime, opts = {}) {
     SRC = src;
     TARGET = tgt;
     DEP = dep === 'dist' ? 'dist' : 'aio';
     PLAT = plat === 'k8s' ? 'k8s' : 'vm';
+    KM = km === 'is' && kmAllowed(src) ? 'is' : 'resident';
+    KMDB = kmdb === 'shared' ? 'shared' : 'both';
     setupEl.hidden = true;
     playerEl.hidden = false;
     // The answer only sets where the downtime switch starts; it can be flipped any time.
     load(strategyFor(src, tgt), downtime ? 'downtime' : 'freeze', opts);
     syncUrl();
   }
-  btnGo.onclick = () => start(selSrc.value, selTgt.value, radio('dep'), radio('plat'), radio('downtime') === 'yes');
+  btnGo.onclick = () => start(selSrc.value, selTgt.value, radio('dep'), radio('plat'), radio('km'), radio('kmdb'),
+    radio('downtime') === 'yes');
   document.getElementById('btnSetup').onclick = () => {
+    narReset();
     if (tl) tl.pause();
     clearTraffic();
     selSrc.value = SRC;
@@ -1295,17 +1840,68 @@
     describe();
     setRadio('dep', DEP);
     setRadio('plat', PLAT);
+    setRadio('km', KM);
+    setRadio('kmdb', KMDB);
     setRadio('downtime', mode === 'downtime' ? 'yes' : 'no');
     playerEl.hidden = true;
     setupEl.hidden = false;
     history.replaceState(null, '', location.pathname);
   };
 
-  // ?src=3.2.0&tgt=4.7.0&dep=aio|dist&plat=vm|k8s&downtime=yes|no skips the setup screen.
+  // ---------- export for customer ----------
+  // Saves this page as one standalone HTML file with the setup locked. The customer can still
+  // switch downtime / freeze window, change speed and step through it. GSAP is inlined so the
+  // file works offline; if it can't be fetched, the file keeps the CDN link.
+  async function buildCustomerHtml(lock) {
+    const lockJson = JSON.stringify(lock).replace(/</g, '\\u003c');
+    // function replacements: the inserted text may contain "$" patterns
+    let html = PRISTINE.replace('<script>\n(() => {',
+      () => `<script>window.MIGRATION_LOCK = ${lockJson};<\/script>\n<script>\n(() => {`);
+    const gsapTag = `<script src="${GSAP_URL}"><\/script>`;
+    try {
+      const code = await (await fetch(GSAP_URL)).text();
+      if (code.length > 1000) {
+        html = html.replace(gsapTag, () => '<script>' + code.replace(/<\/script/gi, '<\\/script') + '<\/script>');
+      }
+    } catch (e) { /* offline: keep the CDN link */ }
+    return html;
+  }
+  async function exportForCustomer() {
+    const who = window.prompt('Customer name to show on the page (optional):', '');
+    if (who === null) return;
+    const lock = { src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, km: KM, kmdb: KMDB,
+      downtime: mode === 'downtime' ? 'yes' : 'no', customer: who.trim().slice(0, 80) };
+    const html = await buildCustomerHtml(lock);
+    const slug = (x) => x.toLowerCase().replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '');
+    const name = ['apim-migration', SRC, 'to', TARGET, lock.customer && slug(lock.customer)].filter(Boolean).join('-') + '.html';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  document.getElementById('btnExport').onclick = exportForCustomer;
+
+  // ?src=3.2.0&tgt=4.7.0&dep=aio|dist&plat=vm|k8s&km=resident|is&kmdb=both|shared&downtime=yes|no
+  // skips the setup screen.
   // ?step=N opens paused at the end of step N; ?at=<label> opens paused just after a timeline label.
   const qs = new URLSearchParams(location.search);
-  if (qs.get('src') && qs.get('tgt') && strategyFor(qs.get('src'), qs.get('tgt'))) {
-    start(qs.get('src'), qs.get('tgt'), qs.get('dep'), qs.get('plat'), qs.get('downtime') === 'yes', { step: parseInt(qs.get('step'), 10) });
+  if (LOCK) {
+    // customer file: no setup screen, no export
+    document.getElementById('btnSetup').hidden = true;
+    document.getElementById('btnExport').hidden = true;
+    if (LOCK.customer) {
+      const pf = document.getElementById('preparedFor');
+      pf.textContent = `Prepared for ${LOCK.customer}`;
+      pf.hidden = false;
+    }
+    start(LOCK.src, LOCK.tgt, LOCK.dep, LOCK.plat, LOCK.km, LOCK.kmdb, LOCK.downtime === 'yes',
+      { step: parseInt(qs.get('step'), 10) });
+    document.title = `APIM ${LOCK.src} → ${LOCK.tgt} migration`;
+  } else if (qs.get('src') && qs.get('tgt') && strategyFor(qs.get('src'), qs.get('tgt'))) {
+    start(qs.get('src'), qs.get('tgt'), qs.get('dep'), qs.get('plat'), qs.get('km'), qs.get('kmdb'),
+      qs.get('downtime') === 'yes', { step: parseInt(qs.get('step'), 10) });
     if (qs.get('at') in tl.labels) {
       tl.pause().seek(tl.labels[qs.get('at')] + 0.8);
       renderCaption();
