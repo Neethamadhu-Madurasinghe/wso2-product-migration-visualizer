@@ -16,7 +16,7 @@ You pick a migration (source version, target version, deployment and platform), 
 
 A caption explains each step, a status panel shows whether APIs are available and changes are allowed, and moving dots show API calls and data changes. The page picks the documented migration approach for the version pair you chose, so the steps match the WSO2 migration guides.
 
-You can also hand the result to a customer as a standalone HTML file or as an animated GIF.
+You can also hand the result to a customer as a standalone HTML file, an animated GIF or a silent MP4 video.
 
 ### How to use it
 
@@ -37,14 +37,15 @@ You can also hand the result to a customer as a standalone HTML file or as an an
    - **Change setup** goes back to the setup screen.
 4. **Share it:**
    - **⬇ Export for customer** downloads one standalone HTML file with this setup locked in. The customer can play it, change the speed and switch downtime/freeze, but cannot change versions. It works offline. See [Customer deliverable](#customer-deliverable).
-   - **🎞 GIF** downloads the whole animation as an animated GIF at the current speed, for email, slides or tickets. See [GIF export](#gif-export).
+   - **🎞 GIF** downloads the whole animation as an animated GIF at the current speed, for email, slides or tickets. See [GIF and video export](#gif-and-video-export).
+   - **🎬 Video** downloads the whole animation as a silent MP4 (25 fps) at the current speed: smoother and sharper than the GIF. For Google Slides, upload the MP4 to Google Drive and use Insert → Video → Google Drive; PowerPoint and Keynote take the file directly.
    - The URL updates after setup, so you can also share or bookmark the link, for example `index.html?src=3.2.0&tgt=4.7.0&dep=aio&plat=vm&km=resident&downtime=yes`.
 
 ### Files
 
 | File | Purpose |
 |---|---|
-| `index.html` | The whole tool: HTML, CSS and JavaScript in one file. GSAP is loaded from cdnjs; the GIF encoder is loaded from jsdelivr only when you make a GIF. |
+| `index.html` | The whole tool: HTML, CSS and JavaScript in one file. GSAP is loaded from cdnjs; the GIF encoder and the MP4 muxer are loaded from jsdelivr only when you make a GIF or a video. |
 | `README.md` | This document. |
 
 ## Limitations
@@ -54,8 +55,9 @@ You can also hand the result to a customer as a standalone HTML file or as an an
 - **Distributed deployments are one generalized pattern** (Gateway, Control Plane, Traffic Manager). Real deployments with more node types, multiple gateways or separate Key Manager nodes are not drawn individually.
 - **The steps are explanatory, not a runbook.** Commands and script names are shown to make the flow clear; some are placeholders (see [Accuracy notes](#accuracy-notes-to-check-before-showing-customers)). Always follow the official migration documentation for the actual procedure.
 - **Some version pairs are not offered:** pairs with no documented direct path (for example 3.2.0 / 4.0.0 / 4.1.0 → 4.3.0 / 4.4.0) are left out of the target list.
-- **Internet access is needed** to load GSAP in `index.html` (the exported customer file has GSAP inlined) and to load the GIF encoder.
-- **GIFs have no audio and no caption text**, only the diagram, the title and the step name.
+- **Internet access is needed** to load GSAP in `index.html` (the exported customer file has GSAP inlined) and to load the GIF encoder or MP4 muxer.
+- **GIFs and videos have no audio and no caption text**, only the diagram, the title and the step name. The narration voice comes from the browser's speech engine, which cannot be recorded.
+- **Video export needs Chrome or Edge** (WebCodecs H.264 encoder). Other browsers show a message instead.
 
 ## What it shows
 
@@ -129,7 +131,7 @@ Setup option for sources up to 4.2.0, plus which DBs are shared: SHARED_DB + API
 ## Customer deliverable
 
 In the player, **⬇ Export for customer** downloads one standalone HTML file (about 165 KB), named for example `apim-migration-3.2.0-to-4.7.0-acme.html`:
-- The current setup is locked in: versions, deployment, platform and Key Manager. There's no setup screen, export or GIF button, and URL parameters are ignored.
+- The current setup is locked in: versions, deployment, platform and Key Manager. There's no setup screen, export, GIF or video button, and URL parameters are ignored.
 - The customer can switch **With downtime / Without downtime (freeze window)**, change the speed, play, pause, step through and use narration. The switch starts at the value chosen at export.
 - An optional customer name is shown as "Prepared for …".
 - GSAP is inlined, so the file works offline. If GSAP can't be fetched at export time, the file keeps the CDN link instead.
@@ -147,16 +149,28 @@ Note for editing: the main inline script must never contain a literal closing sc
 - Captions are spoken one sentence at a time, because Chrome cuts off long utterances. Sentences over 25 words are also split at `;` and `:`. A watchdog moves on if the engine never reports the end of a sentence.
 - `spokenText()` adapts the caption for listening: it spells out `APIM`, `IS`, `SQL` and `*_DB` letter by letter, reads `→` as "to" and ` / ` as "or", and reads `-D` flags as words, e.g. "migrate from version set to 3.2.0". When adding captions with new abbreviations, add them there.
 
-## GIF export
+## GIF and video export
 
-The **🎞 GIF** button (engineer page only; hidden in exported customer files) renders the whole animation, from step 1, into an animated GIF and downloads it as `apim-migration-<src>-to-<tgt>-<dep>-<plat>[-is-km]-<mode>-<speed>x.gif`.
+The **🎞 GIF** and **🎬 Video** buttons (engineer page only; hidden in exported customer files) render the whole animation, from step 1, and download it as `apim-migration-<src>-to-<tgt>-<dep>-<plat>[-is-km]-<mode>-<speed>x.gif` or `.mp4`.
 
-- When pressed, narration is turned off and the speed in use is locked in: a 2× GIF plays twice as fast as 1×. All controls are disabled until it finishes; a status card shows progress and has a Cancel button. Afterwards the page goes back to where it was.
-- The recorder steps the timeline and the traffic dots on a fixed 10 fps clock instead of real time, so no frames are dropped on slow machines.
+Shared by both:
+- When pressed, narration is turned off and the speed in use is locked in: a 2× export plays twice as fast as 1×. All controls are disabled until it finishes; a status card shows progress and has a Cancel button. Afterwards the page goes back to where it was.
+- The recorder steps the timeline and the traffic dots on a fixed clock instead of real time, so no frames are dropped on slow machines.
 - Each frame is the SVG drawn on a canvas at 0.9× the viewBox (1080 px wide, or 1530 px with IS), with the title and setup chips above and "Step N of M · title" below. There is no caption text and no audio.
+
+### Video (MP4)
+
+- Silent H.264 MP4 at 25 fps, encoded by the browser's WebCodecs `VideoEncoder` (High profile, falling back to Main or Baseline) and packaged with [mp4-muxer 5.1.3](https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/) from jsdelivr. A full keyframe every 5 s; the last frame is held for 3 s.
+- Needs Chrome or Edge.
+- Measured in headless Chrome at 1×: 3.2.0→4.6.0 AIO is 79 s, 4.5 MB, about 23 s to make; 4.1.0→4.6.0 distributed + IS + K8s is 126 s, 14.7 MB, about 34 s.
+- Google Slides only inserts video from Google Drive or YouTube: upload the MP4 to Drive first.
+
+### GIF
+
+- Frames are rendered on a 10 fps clock (no frame limit; long animations can exceed 1000 frames, which Google Slides rejects. Use the video for Slides).
 - One shared 255-colour palette (sampled from each step plus the theme colours), and pixels that did not change are written as transparent, which keeps files small. The last frame holds for 3 s and the GIF loops.
 - The encoder ([gifenc 1.0.3](https://cdn.jsdelivr.net/npm/gifenc@1.0.3/)) is loaded from jsdelivr on first use, so it needs an internet connection.
-- Measured in headless Chrome: 4.2.0→4.7.0 AIO at 2× is 258 frames, 1.2 MB, about 5 s to make; 4.1.0→4.6.0 distributed + IS + K8s at 1× is 1216 frames (2 min), 7 MB, about 15 s.
+- Measured in headless Chrome: 4.2.0→4.7.0 AIO at 2× is 258 frames, 1.2 MB, about 5 s to make; 4.1.0→4.6.0 distributed + IS + K8s at 1× is 1227 frames (2 min), 6.7 MB, about 15 s.
 
 ## How it is built
 
@@ -172,6 +186,6 @@ The **🎞 GIF** button (engineer page only; hidden in exported customer files) 
 | Need | Tool |
 |---|---|
 | Interactive, in a browser, step by step (this tool) | SVG + GSAP |
-| MP4 video clips (GIF is built in) | Motion Canvas or Remotion (code-driven, both render to video) |
+| Narrated video (GIF and silent MP4 are built in) | In-browser neural TTS (e.g. Kokoro) or a cloud TTS service, muxed as an audio track |
 | Designer-made reusable animated assets | Rive or Lottie |
 | Many more scenarios | Turn the builders into a scene description (JSON/YAML) and generate the steps |

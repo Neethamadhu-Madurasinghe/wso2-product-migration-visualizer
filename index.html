@@ -205,6 +205,7 @@
     <button id="btnNarrate" aria-pressed="false" title="Read each step aloud. The animation slows down to match the voice.">🔊 Narrate</button>
     <select id="voice" title="Narrator voice" hidden></select>
     <button id="btnGif" title="Download the whole animation as a GIF at the current speed. Narration is turned off.">🎞 GIF</button>
+    <button id="btnVideo" title="Download the whole animation as a silent MP4 video (25 fps) at the current speed. Narration is turned off.">🎬 Video</button>
     <div class="steps" id="steps"></div>
   </div>
   </section>
@@ -1917,64 +1918,80 @@
   }
   document.getElementById('btnExport').onclick = exportForCustomer;
 
-  // ---------- GIF export ----------
-  // Renders the whole animation, from the start, into an animated GIF at the speed chosen when
-  // the button is pressed. Narration is turned off and the controls are locked while it runs.
-  // The recorder steps the timeline and the live traffic on a fixed clock (not in real time),
-  // so no frame is dropped however slow the machine is. Each frame is the SVG drawn onto a
-  // canvas, with the title above and the current step below. All frames share one palette, and
-  // pixels that did not change are left transparent, which keeps the file small.
+  // ---------- GIF and video export ----------
+  // Both render the whole animation, from the start, at the speed chosen when the button is
+  // pressed. Narration is turned off and the controls are locked while it runs. The recorder
+  // steps the timeline and the live traffic on a fixed clock (not in real time), so no frame is
+  // dropped however slow the machine is. Each frame is the SVG drawn onto a canvas, with the
+  // title above and the current step below.
+  // GIF: all frames share one palette, and pixels that did not change are left transparent,
+  // which keeps the file small. Video: silent H.264 MP4 through the browser's WebCodecs encoder.
   const GIFENC_URL = 'https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js';
+  const MP4MUX_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.mjs';
   const GIF_FPS = 10;        // GIF frames per second of playback
-  const GIF_SCALE = 0.9;     // output pixels per SVG unit
-  const GIF_TOP = 64, GIF_BOTTOM = 50; // title and step bands, in output pixels
-  const GIF_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  const VIDEO_FPS = 25;
+  const VIDEO_BITRATE = 4e6;
+  const EXP_SCALE = 0.9;     // output pixels per SVG unit
+  const EXP_TOP = 64, EXP_BOTTOM = 50; // title and step bands, in output pixels
+  const EXP_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
   const btnGif = document.getElementById('btnGif');
+  const btnVideo = document.getElementById('btnVideo');
   const gifStatus = document.getElementById('gifStatus');
   const gifMsg = document.getElementById('gifMsg');
   const gifBar = document.getElementById('gifBar');
 
-  // Draw the current state of the animation onto ctx.
-  async function drawGifFrame(ctx, w, h, svgH) {
+  // A canvas sized for this scene. Video encoders need even dimensions.
+  function exportCanvas() {
+    const [, , vbW, vbH] = svg.getAttribute('viewBox').split(/\s+/).map(Number);
+    const w = Math.round(vbW * EXP_SCALE / 2) * 2, svgH = Math.round(vbH * EXP_SCALE);
+    const h = Math.ceil((EXP_TOP + svgH + EXP_BOTTOM) / 2) * 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    return { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }), w, h, svgH };
+  }
+
+  // Draw the current state of the animation onto the export canvas.
+  async function drawExportFrame({ ctx, w, h, svgH }) {
     ctx.fillStyle = css('--bg');
     ctx.fillRect(0, 0, w, h);
-    const g = ctx.createRadialGradient(w / 2, GIF_TOP, 0, w / 2, GIF_TOP, w * 0.7);
+    const g = ctx.createRadialGradient(w / 2, EXP_TOP, 0, w / 2, EXP_TOP, w * 0.7);
     g.addColorStop(0, '#17203a');
     g.addColorStop(1, css('--bg'));
     ctx.fillStyle = g;
-    ctx.fillRect(0, GIF_TOP, w, svgH);
+    ctx.fillRect(0, EXP_TOP, w, svgH);
     const clone = svg.cloneNode(true);
     clone.setAttribute('xmlns', NS);
     clone.setAttribute('width', w);
     clone.setAttribute('height', svgH);
-    clone.setAttribute('font-family', GIF_FONT);
+    clone.setAttribute('font-family', EXP_FONT);
     const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' }));
     try {
       const img = new Image();
       img.src = url;
       await img.decode();
-      ctx.drawImage(img, 0, GIF_TOP, w, svgH);
+      ctx.drawImage(img, 0, EXP_TOP, w, svgH);
     } finally {
       URL.revokeObjectURL(url);
     }
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = C.text;
-    ctx.font = `600 20px ${GIF_FONT}`;
+    ctx.font = `600 20px ${EXP_FONT}`;
     ctx.fillText(document.getElementById('title').textContent, 20, 30);
     const chips = [document.getElementById('chip'), document.getElementById('chipDep'),
       document.getElementById('chipPlat'), document.getElementById('chipKm')]
       .filter((c) => !c.hidden && c.textContent).map((c) => c.textContent);
     chips.push(mode === 'downtime' ? 'With downtime' : 'Without downtime (freeze window)');
     ctx.fillStyle = C.muted;
-    ctx.font = `13px ${GIF_FONT}`;
+    ctx.font = `13px ${EXP_FONT}`;
     ctx.fillText(chips.join('  ·  '), 20, 52);
     const i = currentStep();
-    const y = GIF_TOP + svgH + 32;
+    const y = EXP_TOP + svgH + 32;
     const num = `Step ${i + 1} of ${STEPS.length}`;
     ctx.fillText(num, 20, y);
     const x = 20 + ctx.measureText(num).width + 16;
     ctx.fillStyle = C.text;
-    ctx.font = `600 17px ${GIF_FONT}`;
+    ctx.font = `600 17px ${EXP_FONT}`;
     ctx.fillText(STEPS[i].title, x, y);
   }
 
@@ -1986,118 +2003,65 @@
     });
   }
 
-  async function exportGif() {
+  // Back to the first frame, with no traffic on screen.
+  function rewindForExport() {
+    clearTraffic();
+    accReq = accWrite = accMig = accTest = 0;
+    lastPanel = '';
+    shownStep = -1;
+    tl.seek(0, false);
+    renderCaption();
+    renderPanel(now());
+  }
+  // Move the animation on by perFrame seconds of animation time, in the same small steps as
+  // the live loop. Ripples run in real time on the page; here they follow playback time.
+  function advanceExport(perFrame, recSpeed) {
+    const sub = Math.ceil(perFrame / 0.05);
+    const dt = perFrame / sub;
+    for (let k = 0; k < sub; k++) {
+      tl.seek(Math.min(tl.duration(), tl.time() + dt), false);
+      tick(dt);
+      rec.tweens = rec.tweens.filter((tw) => { tw.time(tw.time() + dt / recSpeed); return tw.progress() < 1; });
+    }
+  }
+  function exportProgress(label, recSpeed, done, total) {
+    const pct = Math.round((Math.min(done, total) / total) * 100);
+    gifBar.style.width = pct + '%';
+    gifMsg.textContent = `Making ${label} at ${recSpeed}× · step ${currentStep() + 1} of ${STEPS.length} · ${pct}%`;
+  }
+  function exportName(recSpeed, ext) {
+    return ['apim-migration', SRC, 'to', TARGET, DEP, PLAT, hasIs() ? 'is-km' : '', mode, `${recSpeed}x`]
+      .filter(Boolean).join('-') + '.' + ext;
+  }
+  function saveFile(bytes, type, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // Lock the page, run make(recSpeed), then put the page back where the viewer was.
+  async function runExport(label, make) {
     if (rec || !tl) return;
     if (nar.on) btnNarrate.click(); // narration off
-    const gifSpeed = speed;          // locked for the whole recording
+    const recSpeed = speed;          // locked for the whole recording
     const prevTime = tl.time(), wasPlaying = playing();
     tl.pause();
     rec = { cancel: false, tweens: [] };
     lockControls(true);
+    document.getElementById('gifCancel').textContent = 'Cancel';
     gifStatus.hidden = false;
     gifBar.style.width = '0%';
-    gifMsg.textContent = 'Loading the GIF encoder…';
+    gifMsg.textContent = `Loading the ${label} encoder…`;
     try {
-      const { GIFEncoder, quantize, applyPalette } = await import(GIFENC_URL);
-      const [, , vbW, vbH] = svg.getAttribute('viewBox').split(/\s+/).map(Number);
-      const w = Math.round(vbW * GIF_SCALE), svgH = Math.round(vbH * GIF_SCALE), h = GIF_TOP + svgH + GIF_BOTTOM;
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-      // One palette for every frame, from a frame in the middle of each step plus the theme
-      // colors (so traffic dots that are not in the samples keep their exact color).
-      gifMsg.textContent = 'Preparing colors…';
-      const samples = [];
-      for (let k = 0; k < STEPS.length; k++) {
-        const a = tl.labels[STEPS[k].label], b = STEPS[k + 1] ? tl.labels[STEPS[k + 1].label] : tl.duration();
-        tl.seek(a + (b - a) * 0.6, false);
-        shownStep = -1;
-        renderCaption();
-        renderPanel(now());
-        await drawGifFrame(ctx, w, h, svgH);
-        const px = ctx.getImageData(0, 0, w, h).data;
-        const keep = new Uint8Array(Math.ceil(px.length / 4 / 7) * 4);
-        for (let p = 0, q = 0; p < px.length; p += 28, q += 4) keep.set(px.subarray(p, p + 4), q);
-        samples.push(keep);
-      }
-      const swatch = Object.values(C).concat([css('--bg'), css('--panel-2'), '#17203a', '#c3cbe0']);
-      const sw = new Uint8Array(swatch.length * 4 * 400);
-      swatch.forEach((hex, k) => {
-        const n = parseInt(hex.replace('#', ''), 16);
-        for (let j = 0; j < 400; j++) sw.set([(n >> 16) & 255, (n >> 8) & 255, n & 255, 255], (k * 400 + j) * 4);
-      });
-      samples.push(sw);
-      const all = new Uint8Array(samples.reduce((n, a) => n + a.length, 0));
-      samples.reduce((o, a) => { all.set(a, o); return o + a.length; }, 0);
-      const palette = quantize(all, 255);
-      const TRANSPARENT = palette.length; // one extra slot marks unchanged pixels
-      const fullPalette = palette.concat([[0, 0, 0]]);
-      while (fullPalette.length < 256) fullPalette.push([0, 0, 0]);
-
-      // Record from the start.
-      clearTraffic();
-      accReq = accWrite = accMig = accTest = 0;
-      lastPanel = '';
-      shownStep = -1;
-      tl.seek(0, false);
-      const enc = GIFEncoder();
-      const perFrame = gifSpeed / GIF_FPS;           // animation seconds per GIF frame
-      const sub = Math.ceil(perFrame / 0.05);        // the live loop never moves more than 0.05 s at once
-      const dt = perFrame / sub;
-      const total = Math.ceil(tl.duration() / perFrame);
-      let shown = null;
-      for (let f = 0; f <= total; f++) {
-        if (rec.cancel) throw new Error('cancelled');
-        if (f > 0) {
-          for (let k = 0; k < sub; k++) {
-            tl.seek(Math.min(tl.duration(), tl.time() + dt), false);
-            tick(dt);
-            // ripples run in real time on the page; here they follow GIF playback time
-            rec.tweens = rec.tweens.filter((tw) => { tw.time(tw.time() + dt / gifSpeed); return tw.progress() < 1; });
-          }
-        } else {
-          renderCaption();
-          renderPanel(now());
-        }
-        await drawGifFrame(ctx, w, h, svgH);
-        const idx = applyPalette(ctx.getImageData(0, 0, w, h).data, palette);
-        const delay = f === total ? 3000 : 1000 / GIF_FPS; // hold the final frame
-        if (!shown) {
-          shown = idx;
-          enc.writeFrame(idx, w, h, { palette: fullPalette, delay, dispose: 1 });
-        } else {
-          const out = new Uint8Array(idx.length);
-          for (let p = 0; p < idx.length; p++) {
-            if (idx[p] === shown[p]) out[p] = TRANSPARENT;
-            else { out[p] = idx[p]; shown[p] = idx[p]; }
-          }
-          enc.writeFrame(out, w, h, { delay, transparent: true, transparentIndex: TRANSPARENT, dispose: 1 });
-        }
-        const pct = Math.round((f / total) * 100);
-        gifBar.style.width = pct + '%';
-        gifMsg.textContent = `Making GIF at ${gifSpeed}× · step ${currentStep() + 1} of ${STEPS.length} · ${pct}%`;
-        if (f % 5 === 0) await new Promise((res) => setTimeout(res, 0)); // let the page repaint
-      }
-      enc.finish();
-      const bytes = enc.bytes();
-      const name = ['apim-migration', SRC, 'to', TARGET, DEP, PLAT, hasIs() ? 'is-km' : '', mode, `${gifSpeed}x`]
-        .filter(Boolean).join('-') + '.gif';
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-      gifMsg.textContent = `GIF saved: ${name} (${(bytes.length / 1048576).toFixed(1)} MB)`;
+      await make(recSpeed);
     } catch (e) {
-      gifMsg.textContent = e.message === 'cancelled' ? 'GIF cancelled.'
-        : `Could not make the GIF: ${e.message}. The encoder is loaded from the internet, so check the connection.`;
+      gifMsg.textContent = e.message === 'cancelled' ? `${label} cancelled.` : `Could not make the ${label}: ${e.message}`;
     } finally {
       rec.tweens.forEach((tw) => tw.progress(1));
       rec = null;
-      // back to where the viewer was
       clearTraffic();
       shownStep = -1;
       lastPanel = '';
@@ -2111,7 +2075,145 @@
       setTimeout(() => { if (!rec) gifStatus.hidden = true; }, 6000);
     }
   }
-  btnGif.onclick = () => { document.getElementById('gifCancel').textContent = 'Cancel'; exportGif(); };
+  const loadModule = (url) => import(url).catch(() => {
+    throw new Error('the encoder is loaded from the internet; check the connection');
+  });
+
+  async function makeGif(recSpeed) {
+    const { GIFEncoder, quantize, applyPalette } = await loadModule(GIFENC_URL);
+    const cv = exportCanvas();
+    const { ctx, w, h } = cv;
+
+    // One palette for every frame, from a frame in the middle of each step plus the theme
+    // colors (so traffic dots that are not in the samples keep their exact color).
+    gifMsg.textContent = 'Preparing colors…';
+    const samples = [];
+    for (let k = 0; k < STEPS.length; k++) {
+      const a = tl.labels[STEPS[k].label], b = STEPS[k + 1] ? tl.labels[STEPS[k + 1].label] : tl.duration();
+      tl.seek(a + (b - a) * 0.6, false);
+      shownStep = -1;
+      renderCaption();
+      renderPanel(now());
+      await drawExportFrame(cv);
+      const px = ctx.getImageData(0, 0, w, h).data;
+      const keep = new Uint8Array(Math.ceil(px.length / 4 / 7) * 4);
+      for (let p = 0, q = 0; p < px.length; p += 28, q += 4) keep.set(px.subarray(p, p + 4), q);
+      samples.push(keep);
+    }
+    const swatch = Object.values(C).concat([css('--bg'), css('--panel-2'), '#17203a', '#c3cbe0']);
+    const sw = new Uint8Array(swatch.length * 4 * 400);
+    swatch.forEach((hex, k) => {
+      const n = parseInt(hex.replace('#', ''), 16);
+      for (let j = 0; j < 400; j++) sw.set([(n >> 16) & 255, (n >> 8) & 255, n & 255, 255], (k * 400 + j) * 4);
+    });
+    samples.push(sw);
+    const all = new Uint8Array(samples.reduce((n, a) => n + a.length, 0));
+    samples.reduce((o, a) => { all.set(a, o); return o + a.length; }, 0);
+    const palette = quantize(all, 255);
+    const TRANSPARENT = palette.length; // one extra slot marks unchanged pixels
+    const fullPalette = palette.concat([[0, 0, 0]]);
+    while (fullPalette.length < 256) fullPalette.push([0, 0, 0]);
+
+    rewindForExport();
+    const enc = GIFEncoder();
+    const delayCs = Math.round(100 / GIF_FPS);     // frame delay in GIF time units (1/100 s)
+    const perFrame = (recSpeed * delayCs) / 100;   // animation seconds per GIF frame
+    const total = Math.ceil(tl.duration() / perFrame);
+    let shown = null;
+    for (let f = 0; f <= total; f++) {
+      if (rec.cancel) throw new Error('cancelled');
+      if (f > 0) advanceExport(perFrame, recSpeed);
+      await drawExportFrame(cv);
+      const idx = applyPalette(ctx.getImageData(0, 0, w, h).data, palette);
+      const delay = f === total ? 3000 : delayCs * 10; // ms; hold the final frame
+      if (!shown) {
+        shown = idx;
+        enc.writeFrame(idx, w, h, { palette: fullPalette, delay, dispose: 1 });
+      } else {
+        const out = new Uint8Array(idx.length);
+        for (let p = 0; p < idx.length; p++) {
+          if (idx[p] === shown[p]) out[p] = TRANSPARENT;
+          else { out[p] = idx[p]; shown[p] = idx[p]; }
+        }
+        enc.writeFrame(out, w, h, { delay, transparent: true, transparentIndex: TRANSPARENT, dispose: 1 });
+      }
+      exportProgress('GIF', recSpeed, f, total);
+      if (f % 5 === 0) await new Promise((res) => setTimeout(res, 0)); // let the page repaint
+    }
+    enc.finish();
+    const bytes = enc.bytes();
+    const name = exportName(recSpeed, 'gif');
+    saveFile(bytes, 'image/gif', name);
+    gifMsg.textContent = `GIF saved: ${name} (${total + 1} frames, ${(bytes.length / 1048576).toFixed(1)} MB)`;
+  }
+
+  // First H.264 profile this browser can encode at this size: High, then Main, then Baseline.
+  async function pickVideoConfig(w, h) {
+    for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42e028']) {
+      const config = { codec, width: w, height: h, bitrate: VIDEO_BITRATE, framerate: VIDEO_FPS, avc: { format: 'avc' } };
+      try {
+        if ((await VideoEncoder.isConfigSupported(config)).supported) return config;
+      } catch (e) { /* try the next one */ }
+    }
+    return null;
+  }
+
+  async function makeVideo(recSpeed) {
+    if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') {
+      throw new Error('this browser cannot encode video. Use Chrome or Edge');
+    }
+    const { Muxer, ArrayBufferTarget } = await loadModule(MP4MUX_URL);
+    const cv = exportCanvas();
+    const { canvas, w, h } = cv;
+    const config = await pickVideoConfig(w, h);
+    if (!config) throw new Error('this browser has no H.264 encoder. Use Chrome or Edge');
+    const muxer = new Muxer({
+      target: new ArrayBufferTarget(),
+      video: { codec: 'avc', width: w, height: h, frameRate: VIDEO_FPS },
+      fastStart: 'in-memory',
+    });
+    let encError = null;
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (e) => { encError = e; },
+    });
+    encoder.configure(config);
+
+    rewindForExport();
+    const perFrame = recSpeed / VIDEO_FPS;      // animation seconds per video frame
+    const total = Math.ceil(tl.duration() / perFrame);
+    const frames = total + 1 + VIDEO_FPS * 3;   // plus 3 s on the final frame
+    const us = 1e6 / VIDEO_FPS;
+    try {
+      for (let f = 0; f < frames; f++) {
+        if (rec.cancel) throw new Error('cancelled');
+        if (encError) throw encError;
+        if (f <= total) {
+          if (f > 0) advanceExport(perFrame, recSpeed);
+          await drawExportFrame(cv);
+        }
+        const frame = new VideoFrame(canvas, { timestamp: Math.round(f * us), duration: Math.round(us) });
+        encoder.encode(frame, { keyFrame: f % (VIDEO_FPS * 5) === 0 }); // a full frame every 5 s
+        frame.close();
+        // don't run ahead of the encoder
+        while (encoder.encodeQueueSize > 6) await new Promise((res) => setTimeout(res, 5));
+        exportProgress('video', recSpeed, f, frames - 1);
+        if (f % 10 === 0) await new Promise((res) => setTimeout(res, 0)); // let the page repaint
+      }
+      await encoder.flush();
+      if (encError) throw encError;
+    } finally {
+      if (encoder.state !== 'closed') encoder.close();
+    }
+    muxer.finalize();
+    const bytes = muxer.target.buffer;
+    const name = exportName(recSpeed, 'mp4');
+    saveFile(bytes, 'video/mp4', name);
+    gifMsg.textContent = `Video saved: ${name} (${Math.round(frames / VIDEO_FPS)} s, ${(bytes.byteLength / 1048576).toFixed(1)} MB)`;
+  }
+
+  btnGif.onclick = () => runExport('GIF', makeGif);
+  btnVideo.onclick = () => runExport('video', makeVideo);
   document.getElementById('gifCancel').onclick = () => { if (rec) rec.cancel = true; else gifStatus.hidden = true; };
 
   // ?src=3.2.0&tgt=4.7.0&dep=aio|dist&plat=vm|k8s&km=resident|is&kmdb=both|shared&downtime=yes|no
@@ -2119,10 +2221,11 @@
   // ?step=N opens paused at the end of step N; ?at=<label> opens paused just after a timeline label.
   const qs = new URLSearchParams(location.search);
   if (LOCK) {
-    // customer file: no setup screen, no export, no GIF
+    // customer file: no setup screen, no export, no GIF or video
     document.getElementById('btnSetup').hidden = true;
     document.getElementById('btnExport').hidden = true;
     btnGif.hidden = true;
+    btnVideo.hidden = true;
     if (LOCK.customer) {
       const pf = document.getElementById('preparedFor');
       pf.textContent = `Prepared for ${LOCK.customer}`;
