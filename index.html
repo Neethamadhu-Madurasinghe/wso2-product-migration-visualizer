@@ -38,6 +38,7 @@
     --client: #2b3654;
     --backend-row: #12302f;
     --term-bg: #0a0e17; --term-text: #34d399;
+    --on-accent: #0f1420; /* text on a filled accent box (simple view) */
     color-scheme: dark;
   }
   /* Light theme. Accents are darker than in the dark theme so lines and labels stay readable on white. */
@@ -74,6 +75,7 @@
     --client: #d5dbe8;
     --backend-row: #e0f3f0;
     --term-bg: #0f1420; --term-text: #34d399;
+    --on-accent: #ffffff;
     color-scheme: light;
   }
   * { box-sizing: border-box; }
@@ -120,10 +122,19 @@
   header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }
   header h1 { font-size: 20px; margin: 0 0 2px; font-weight: 600; }
   header p { margin: 0; color: var(--muted); font-size: 14px; }
-  .modes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .modes button { border: 0; border-radius: 0; padding: 8px 14px; background: var(--panel); color: var(--muted); }
-  .modes button + button { border-left: 1px solid var(--line); }
-  .modes button.active { background: var(--accent-bg); color: var(--text); }
+  .modes, .views { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .modes button, .views button { border: 0; border-radius: 0; padding: 8px 14px; background: var(--panel); color: var(--muted); }
+  .modes button + button, .views button + button { border-left: 1px solid var(--line); }
+  .modes button.active, .views button.active { background: var(--accent-bg); color: var(--text); }
+  /* Simple view: the whole player fits the window, no scrolling; the step list is in the picture. */
+  body.simple .wrap { max-width: none; height: 100vh; display: flex; flex-direction: column; padding: 10px 16px; }
+  body.simple #player { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  body.simple header { margin-bottom: 8px; }
+  body.simple header h1 { font-size: 18px; }
+  body.simple .stage { flex: 1; min-height: 320px; }
+  body.simple .stage svg { width: 100%; height: 100%; }
+  body.simple .caption, body.simple .steps { display: none; }
+  body.simple .controls { margin-top: 8px; }
   .stage {
     position: relative;
     background: radial-gradient(ellipse at 50% 0%, var(--glow) 0%, var(--bg) 70%);
@@ -224,6 +235,10 @@
       <p id="subtitle"></p>
     </div>
     <div class="header-actions">
+      <div class="views" role="group" aria-label="View">
+        <button data-view="simple" title="Simple picture for newcomers: fewer details, a step list, fits on one screen">Simple</button>
+        <button data-view="advanced" title="Full detail: nodes, connections, data changes and step descriptions">Advanced</button>
+      </div>
       <div class="modes" role="group" aria-label="Downtime option">
         <button data-mode="downtime">With downtime</button>
         <button data-mode="freeze">Without downtime (freeze window)</button>
@@ -296,6 +311,7 @@
     Object.assign(K, {
       region: css('--region'), shadow: css('--shadow'), shadowOp: css('--shadow-op'), tint: Number(css('--tint')) || 1,
       client: css('--client'), backendRow: css('--backend-row'), termBg: css('--term-bg'), termText: css('--term-text'),
+      onAccent: css('--on-accent'), text2: css('--text-2'),
     });
     DB_LOOK.real = { stroke: C.db, body: css('--db-body'), top: css('--db-top') };
     DB_LOOK.fresh = { stroke: C.fresh, body: css('--fresh-body'), top: css('--fresh-top') };
@@ -1433,6 +1449,523 @@
     return st;
   }
 
+  // ---------- simple view ----------
+  // A calmer picture for newcomers: one box per product, databases that fill with colour as
+  // they are migrated, only API calls moving, and a step list on the left instead of captions.
+  // It uses the same steps and timeline labels as the advanced view, so step navigation,
+  // narration, the downtime switch and the exports work the same way.
+  let VIEW = 'advanced'; // 'simple' | 'advanced'
+  // Blue-green: the current setup is blue, the new one green (the advanced view keeps orange/blue).
+  const BLUE = () => C.neu, GREEN = () => C.ok;
+  const isSimple = () => VIEW === 'simple';
+  const SV = { W: 1500, H: 760, CX: 920, PANEL_Y: 150, PANEL_H: 410, PANEL_W: 540, OLD_X: 360, NEW_X: 940,
+    BOX_Y: 195, BOX_H: 84, DB_Y: 335, TEMP_Y: 472, BE_Y: 606, LB: [850, 30, 140, 70] };
+  const SV_SHIFT = SV.NEW_X - SV.OLD_X; // a copied database keeps its order, one column to the right
+
+  // Short step titles and one-line explanations for the simple view.
+  function simpleText(label, scn, mode) {
+    const src = SRC, isT = isTgtVer();
+    const T = {
+      running: ['Production today', hasIs()
+        ? `APIM ${src} serves your API calls. ${isNameFor(src)} is its Key Manager.`
+        : `APIM ${src} serves your API calls and passes them to your backend.`],
+      build: [hasIs() ? 'Install the new versions' : `Install ${TARGET}`, hasIs()
+        ? `APIM ${TARGET} and IS ${isT} are installed next to it. No data and no traffic yet.`
+        : `APIM ${TARGET} is installed next to it. No data and no traffic yet.`],
+      fresh: ['Test with empty databases', 'The new setup gets your settings and is tested on empty databases. Real data is not touched.'],
+      stop: [`Stop ${src} (downtime)`, 'The maintenance window starts. APIs are down until the switch.'],
+      freeze: ['Freeze changes', 'APIs keep working, but no new APIs, apps or subscriptions for now.'],
+      copy: [isSplit() ? 'Copy and split the data' : 'Copy the data', isSplit()
+        ? 'The databases are copied. Each product gets its own copy.'
+        : `The databases are copied for ${TARGET}. The originals stay as they are.`],
+      ismig: ['Migrate the IS data', `The IS migration runs and migrates the IS data to ${isT}.${isK8s() ? ' It runs on a temporary VM.' : ''}`],
+      tempvm: ['Add a temporary VM', 'The migrations can’t run inside Kubernetes, so they run on a temporary VM.'],
+      tmp42: [`Add a temporary ${VIA}`, `${src} can’t go straight to ${TARGET}, so the data goes through ${VIA} first.`],
+      // Drawn as one JAR to keep the picture simple; the advanced view shows the SHARED_DB script
+      // and the identity and API Manager migration clients separately.
+      apimig: isMerged()
+        ? ['Migrate API Manager data', 'The API Manager migration runs and migrates APIs, apps and subscriptions.']
+        : ['Migrate identity and APIM data', `The identity and API Manager migrations run and migrate the data to ${scn === 'twostep' ? VIA : TARGET}.`],
+      removevm: ['Remove the temporary VM', 'Its job is done, so it is removed.'],
+      removetmp: [`Remove the temporary ${VIA}`, `The data is now at ${VIA}. The temporary ${VIA} is removed.`],
+      // From 4.2.0 on, only the database schema is migrated.
+      migrate: scn === 'twostep'
+        ? [`Migrate the schema to ${TARGET}`, `One SQL script migrates the database schema from ${VIA} to ${TARGET}.`]
+        : ['Migrate the database schema', `One SQL script migrates the database schema to ${TARGET}.`],
+      connectkm: ['Connect IS to APIM', 'Both are started, and IS is added to APIM as a Key Manager.'],
+      convert: ['Finish Key Manager setup', 'A SQL script makes IS work like APIM’s built-in Key Manager.'],
+      start: [`Start and test ${TARGET}`, `${TARGET} starts with the real data and is tested. No users yet.`],
+      switch: ['Switch the traffic', mode === 'downtime'
+        ? `Traffic moves to ${TARGET} and APIs are back. ${src} is kept for rollback.`
+        : `Traffic moves to ${TARGET} with no outage. Changes are allowed again. ${src} is kept for rollback.`],
+    };
+    const [title, text] = T[label];
+    return { label, title, text };
+  }
+  const SIMPLE_SKIP = ['sql', 'identity']; // folded into the single 'apimig' step
+  const simpleStepsFor = (scn, mode) => stepsFor(scn, mode).filter((st) => !SIMPLE_SKIP.includes(st.label))
+    .map((st) => simpleText(st.label, scn, mode));
+
+  const wrapWords = (s, max) => s.split(' ').reduce((lines, w) => {
+    const last = lines[lines.length - 1];
+    if (last && (last + ' ' + w).length <= max) lines[lines.length - 1] = last + ' ' + w;
+    else lines.push(w);
+    return lines;
+  }, []);
+
+  // The step list on the left: done steps ticked, the current one large with its explanation.
+  function stepList(parent) {
+    const g = el('g', {}, parent);
+    txt(g, 22, 36, 'STEPS', { 'font-size': 12, 'letter-spacing': 1.5, 'font-weight': 600, fill: C.muted });
+    const items = el('g', {}, g);
+    return (cur) => {
+      items.innerHTML = '';
+      let y = 52;
+      STEPS.forEach((st, j) => {
+        const active = j === cur, past = j < cur;
+        const lines = active ? wrapWords(st.text, 36) : [];
+        const h = active ? 46 + lines.length * 18 + 10 : 34;
+        const it = el('g', { style: 'cursor:pointer' }, items);
+        it.addEventListener('click', () => { if (!rec) goTo(j); });
+        el('rect', { x: 10, y, width: 318, height: h - 6, rx: 12, fill: active ? C.text : 'transparent',
+          'fill-opacity': active ? 0.07 : 1, stroke: active ? C.muted : 'none', 'stroke-width': 1.5 }, it);
+        const cy = y + (active ? 23 : 14);
+        el('circle', { cx: 34, cy, r: active ? 13 : 10.5, fill: active ? C.text : past ? C.ok : C.panel,
+          stroke: active ? C.text : past ? C.ok : C.grey, 'stroke-width': 1.5 }, it);
+        txt(it, 34, cy + (active ? 4.5 : 4), past ? '✓' : String(j + 1), { 'text-anchor': 'middle',
+          'font-size': active ? 13 : 11, 'font-weight': 700, fill: active ? css('--bg') : past ? K.onAccent : C.muted });
+        txt(it, 56, cy + (active ? 6 : 4.5), st.title, { 'font-size': active ? (st.title.length > 26 ? 15.5 : 17) : 13.5, 'font-weight': active ? 700 : 500,
+          fill: active ? C.text : C.muted, opacity: active || past ? 1 : 0.8 });
+        lines.forEach((l, k) => txt(it, 56, y + 52 + k * 18, l, { 'font-size': 13, fill: K.text2 }));
+        y += h;
+      });
+    };
+  }
+
+  // Product box. Filled = running, outlined = stopped, amber = a migration tool is running in it.
+  const SIMPLE_STATUS = { run: 'Running', frozen: '❄ Changes frozen', stopped: 'Stopped', standby: 'Standby · for rollback',
+    off: 'Not started', test: 'Testing', ready: 'Stopped · tested', mig: 'Migrating…', done: 'Stopped',
+    live: 'Running · tested', serve: 'Serving API calls', idle: 'Ready' };
+  const LOOK = {
+    off: () => ({ fill: C.panel, stroke: C.grey, text: C.grey }),
+    old: () => ({ fill: BLUE(), stroke: BLUE(), text: K.onAccent }),
+    oldIdle: () => ({ fill: C.panel, stroke: BLUE(), text: BLUE() }),
+    neu: () => ({ fill: GREEN(), stroke: GREEN(), text: K.onAccent }),
+    neuIdle: () => ({ fill: C.panel, stroke: GREEN(), text: GREEN() }),
+    tmp: () => ({ fill: C.panel, stroke: C.muted, text: C.text }),
+    work: () => ({ fill: C.warn, stroke: C.warn, text: K.onAccent }),
+  };
+  function sBox(parent, cx, y, w, h, name, ver, look, first, dashed) {
+    const x = cx - w / 2, l = LOOK[look](), big = h >= 80;
+    const g = el('g', { filter: 'url(#shadow)' }, parent);
+    const rect = el('rect', { x, y, width: w, height: h, rx: 14, fill: l.fill, stroke: l.stroke, 'stroke-width': 2.5,
+      ...(dashed ? { 'stroke-dasharray': '7 5' } : {}) }, g);
+    const mid = { 'text-anchor': 'middle', fill: l.text };
+    const texts = [
+      txt(g, cx, y + (big ? 24 : 20), name, { ...mid, 'font-size': big ? 14 : 12.5, 'font-weight': 600 }),
+      txt(g, cx, y + (big ? 53 : 39), ver, { ...mid, 'font-size': big ? 24 : 15, 'font-weight': 700 }),
+    ];
+    const status = {};
+    Object.entries(SIMPLE_STATUS).forEach(([k, label]) => {
+      status[k] = txt(g, cx, y + h - (big ? 11 : 9), label, { ...mid, 'font-size': 12.5, opacity: k === first ? 1 : 0 });
+      texts.push(status[k]);
+    });
+    return { g, rect, texts, status, cx, x, y, w, h };
+  }
+  function setBox(tl, box, look, status, pos) {
+    const l = LOOK[look]();
+    tl.to(box.rect, { attr: { fill: l.fill, stroke: l.stroke }, duration: 0.5 }, pos);
+    tl.to(box.texts, { attr: { fill: l.text }, duration: 0.5 }, '<');
+    if (status) showStatus(tl, box, status, '<');
+  }
+
+  // Database: a cylinder filled with the colour of the version its data belongs to. Migration
+  // raises a new colour from the bottom; the label inside shows the version once it is full.
+  let clipSeq = 0;
+  function sDb(parent, defs, cx, name, labels, empty) {
+    const w = 92, h = 74, ry = 10, x = cx - w / 2, y0 = SV.DB_Y;
+    const g = el('g', {}, parent);
+    const shape = `M${x},${y0} v${h} a${w / 2},${ry} 0 0 0 ${w},0 v${-h} a${w / 2},${ry} 0 0 0 ${-w},0 z`;
+    const id = 'simpleClip' + (++clipSeq);
+    el('path', { d: shape }, el('clipPath', { id }, defs));
+    const bottom = y0 + h + ry, full = h + 2 * ry;
+    el('path', { d: shape, fill: empty ? C.panel : BLUE() }, g);
+    const layers = {
+      via: el('rect', { x, y: bottom, width: w, height: 0, fill: C.db, 'clip-path': `url(#${id})` }, g),
+      tgt: el('rect', { x, y: bottom, width: w, height: 0, fill: GREEN(), 'clip-path': `url(#${id})` }, g),
+    };
+    const edge = empty ? C.fresh : C.text;
+    const outline = el('path', { d: shape, fill: 'none', stroke: edge, 'stroke-opacity': empty ? 1 : 0.3, 'stroke-width': 2,
+      ...(empty ? { 'stroke-dasharray': '6 4' } : {}) }, g);
+    el('ellipse', { cx, cy: y0, rx: w / 2, ry, fill: empty ? 'none' : '#ffffff', 'fill-opacity': 0.22, stroke: edge,
+      'stroke-opacity': empty ? 1 : 0.3, 'stroke-width': 2, ...(empty ? { 'stroke-dasharray': '6 4' } : {}) }, g);
+    const lab = {};
+    Object.entries(labels).forEach(([k, s], i) => {
+      lab[k] = txt(g, cx, y0 + h / 2 + 9, s, { 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700,
+        fill: empty ? C.fresh : K.onAccent, opacity: i ? 0 : 1 });
+    });
+    txt(g, cx, bottom + 18, name, { 'text-anchor': 'middle', 'font-size': 12.5, 'font-weight': 600 });
+    return { g, layers, lab, outline, cx, bottom, full, top: y0 - ry };
+  }
+  function fillTo(tl, db, key, level, pos) {
+    tl.to(db.layers[key], { attr: { y: db.bottom - level * db.full, height: level * db.full }, duration: 1.4, ease: 'power1.inOut' }, pos);
+    if (level >= 1) {
+      tl.to(Object.values(db.lab), { opacity: 0, duration: 0.3 }, '-=0.3');
+      tl.to(db.lab[key], { opacity: 1, duration: 0.3 }, '<0.15');
+    }
+  }
+  const pulse = (tl, dbs, pos) => tl.to(dbs.map((d) => d.outline), { attr: { 'stroke-width': 6 },
+    duration: 0.3, yoyo: true, repeat: 1 }, pos);
+
+  // Connector from a product box down to its databases (or from a temporary box up to them).
+  function sLinks(parent, box, dbs, up, attrs = {}) {
+    return dbs.map((d) => {
+      const pts = up
+        ? [[box.cx, box.y], [box.cx, box.y - 12], [d.cx, box.y - 12], [d.cx, d.bottom + 26]]
+        : [[box.cx, box.y + box.h], [box.cx, 305], [d.cx, 305], [d.cx, d.top]];
+      return el('path', { d: toD(pts), fill: 'none', stroke: C.muted, 'stroke-opacity': 0.7, 'stroke-width': 2, ...attrs }, parent);
+    });
+  }
+
+  function buildSimpleScene(scn, mode) {
+    const src = SRC, both = KMDB === 'both';
+    svg.setAttribute('viewBox', `0 0 ${SV.W} ${SV.H}`);
+    svg.innerHTML = '';
+    const defs = el('defs', {}, svg);
+    defs.innerHTML = `<filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="${K.shadow}" flood-opacity="${K.shadowOp}"/></filter>`;
+    const layerBg = el('g', {}, svg);
+    const layerLinks = el('g', {}, svg);
+    const envSrc = el('g', {}, svg);
+    const envTgt = el('g', {}, svg);
+    const layerTraffic = el('g', {}, svg);
+    const layerTop = el('g', {}, svg);
+    const s = { simple: true, layerTraffic };
+    s.renderSteps = stepList(layerBg);
+
+    // Status chips (top left of the diagram)
+    txt(layerBg, 372, 42, 'API calls', { 'font-size': 13, fill: C.muted });
+    txt(layerBg, 372, 78, 'Changes', { 'font-size': 13, fill: C.muted });
+    s.stApi = pill(layerBg, 450, 25, 190, '', C.ok);
+    s.stChg = pill(layerBg, 450, 61, 190, '', C.ok);
+    s.stBy = el('text', { opacity: 0 }, layerBg);
+
+    // Clients and the load balancer (top centre)
+    const [lx, ly, lw, lh] = SV.LB, lbIn = [lx, ly + lh / 2];
+    s.clients = [[770, 40], [745, 66], [770, 92]];
+    s.clients.forEach(([x, y]) => {
+      el('circle', { cx: x, cy: y - 6, r: 6, fill: K.client, stroke: C.muted }, layerBg);
+      el('path', { d: `M${x - 11},${y + 12} a11,9 0 0 1 22,0 z`, fill: K.client, stroke: C.muted }, layerBg);
+    });
+    txt(layerBg, 700, 70, 'Users', { 'text-anchor': 'end', 'font-size': 13, fill: C.muted });
+    s.lbRect = el('rect', { x: lx, y: ly, width: lw, height: lh, rx: 12, fill: C.panel, stroke: BLUE(), 'stroke-width': 2.5, filter: 'url(#shadow)' }, layerBg);
+    txt(layerBg, SV.CX, ly + 22, 'Load balancer', { 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 600 });
+    s.lbArrow = el('g', {}, layerBg);
+    el('line', { x1: SV.CX, y1: ly + 34, x2: SV.CX, y2: ly + 58, stroke: C.text, 'stroke-width': 3, 'stroke-linecap': 'round' }, s.lbArrow);
+    el('path', { d: `M${SV.CX},${ly + 64} l-6,-9 h12 z`, fill: C.text }, s.lbArrow);
+    s.lbDown = badge(layerTop, 1005, 52, 150, '⛔ APIs down', C.bad);
+    s.lbIn = lbIn;
+
+    // Backend (bottom centre)
+    const be = el('g', { filter: 'url(#shadow)' }, layerBg);
+    el('rect', { x: SV.CX - 110, y: SV.BE_Y, width: 220, height: 62, rx: 12, fill: C.panel, stroke: C.backend, 'stroke-width': 2.5 }, be);
+    txt(be, SV.CX, SV.BE_Y + 27, 'Backend services', { 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 600, fill: C.backend });
+    txt(be, SV.CX, SV.BE_Y + 46, 'your APIs’ real implementation', { 'text-anchor': 'middle', 'font-size': 11.5, fill: C.muted });
+
+    // Panels: current setup on the left, new setup on the right
+    const panel = (parent, x, label, color) => {
+      const g = el('g', {}, parent);
+      el('rect', { x, y: SV.PANEL_Y, width: SV.PANEL_W, height: SV.PANEL_H, rx: 18, fill: C.panel, 'fill-opacity': 0.45,
+        stroke: color, 'stroke-opacity': 0.55, 'stroke-width': 1.5, 'stroke-dasharray': '6 6' }, g);
+      txt(g, x + 20, SV.PANEL_Y + 28, label, { 'font-size': 13, 'font-weight': 700, 'letter-spacing': 1.5, fill: color });
+      return g;
+    };
+    s.envSrc = envSrc;
+    panel(envSrc, SV.OLD_X, 'BLUE · CURRENT SETUP', BLUE());
+    s.panelNew = panel(envTgt, SV.NEW_X, `GREEN · NEW SETUP${isK8s() ? ' · KUBERNETES' : ''}`, GREEN());
+
+    // Positions. With IS, APIM sits on the inner side of each panel and IS on the outer side.
+    const oApim = hasIs() ? 770 : 630, oIs = 480;
+    const nApim = hasIs() ? 1070 : 1210, nIs = 1360;
+    const isLabel = (v) => `IS ${v}`;
+    const oldDbX = !hasIs() ? { S: 565, A: 695 } : both ? { S: 570, A: 690 } : { I: 460, S: 625, A: 790 };
+
+    // Current setup
+    s.src = { apim: sBox(envSrc, oApim, SV.BOX_Y, 200, SV.BOX_H, 'API Manager', src, 'old', 'run') };
+    if (hasIs()) s.src.is = sBox(envSrc, oIs, SV.BOX_Y, 180, SV.BOX_H, IS_FOR[src][0] === 'IS-KM' ? 'IS Key Manager' : 'Identity Server', IS_FOR[src][1], 'old', 'run');
+    const oldDb = {
+      S: sDb(envSrc, defs, oldDbX.S, 'SHARED_DB', { src }, false),
+      A: sDb(envSrc, defs, oldDbX.A, 'APIM_DB', { src }, false),
+    };
+    if (oldDbX.I) oldDb.I = sDb(envSrc, defs, oldDbX.I, 'IDENTITY_DB', { src: isLabel(IS_FOR[src][1]) }, false);
+    sLinks(layerLinks, s.src.apim, [oldDb.S, oldDb.A]);
+    if (hasIs()) {
+      sLinks(layerLinks, s.src.is, both ? [oldDb.S, oldDb.A] : [oldDb.S, oldDb.I]);
+      el('line', { x1: oIs + 90, y1: SV.BOX_Y + 42, x2: oApim - 100, y2: SV.BOX_Y + 42, stroke: C.muted, 'stroke-width': 2.5 }, layerLinks);
+    }
+    s.oldDbs = Object.values(oldDb);
+    s.srcBoxes = Object.values(s.src);
+    s.freezeBadge = badge(layerTop, SV.OLD_X + 170, 512, 200, '❄ Changes frozen', C.warn);
+    s.rollbackBadge = badge(layerTop, SV.OLD_X + 160, 512, 220, '↩ Kept for rollback', BLUE());
+
+    // New setup
+    const tgtIsVer = isTgtVer();
+    s.tgt = { apim: sBox(envTgt, nApim, SV.BOX_Y, 200, SV.BOX_H, 'API Manager', TARGET, 'off', 'off') };
+    if (hasIs()) s.tgt.is = sBox(envTgt, nIs, SV.BOX_Y, 180, SV.BOX_H, 'Identity Server', tgtIsVer, 'off', 'off');
+    s.tgtBoxes = Object.values(s.tgt);
+    // Target databases: where each one comes from on the left, and which boxes use it.
+    const apimLabels = scn === 'twostep' ? { src, via: VIA, tgt: TARGET } : { src, tgt: TARGET };
+    const isLabels = { src: isLabel(IS_FOR[src][1]), tgt: isLabel(tgtIsVer) };
+    const slots = []; // [key, x, name, labels, from]
+    if (isSplit()) {
+      slots.push(['S', 1015, 'SHARED_DB', apimLabels, oldDbX.S], ['A', 1125, 'APIM_DB', apimLabels, oldDbX.A],
+        ['IsS', 1305, 'SHARED_DB', isLabels, oldDbX.S], ['IsI', 1415, 'IDENTITY_DB', isLabels, both ? oldDbX.A : oldDbX.I]);
+    } else if (isMerged() && !both) {
+      slots.push(['A', 1050, 'APIM_DB', apimLabels, oldDbX.A], ['S', 1215, 'SHARED_DB', apimLabels, oldDbX.S],
+        ['I', 1380, 'IDENTITY_DB', isLabels, oldDbX.I]);
+    } else {
+      slots.push(['S', oldDbX.S + SV_SHIFT, 'SHARED_DB', apimLabels, oldDbX.S], ['A', oldDbX.A + SV_SHIFT, 'APIM_DB', apimLabels, oldDbX.A]);
+    }
+    s.db = {};
+    s.fresh = [];
+    s.copies = [];
+    slots.forEach(([key, x, name, labels, from]) => {
+      s.fresh.push(sDb(envTgt, defs, x, name, { empty: 'empty' }, true));
+      s.db[key] = sDb(envTgt, defs, x, name, labels, false);
+      s.copies.push([s.db[key], from - x]);
+    });
+    const apimDbs = [s.db.S, s.db.A];
+    const isDbs = !hasIs() ? [] : isSplit() ? [s.db.IsS, s.db.IsI] : both ? [s.db.S, s.db.A] : [s.db.S, s.db.I];
+    const freshOf = (dbs) => dbs.map((d) => s.fresh[Object.values(s.db).indexOf(d)]);
+    s.tgtLinks = { apim: sLinks(layerLinks, s.tgt.apim, apimDbs) };
+    if (hasIs()) s.tgtLinks.is = sLinks(layerLinks, s.tgt.is, isDbs);
+    s.freshLinks = [...sLinks(layerLinks, s.tgt.apim, freshOf(apimDbs), false, { stroke: C.fresh }),
+      ...(hasIs() ? sLinks(layerLinks, s.tgt.is, freshOf(isDbs), false, { stroke: C.fresh }) : [])];
+    if (hasIs()) {
+      const km = { x1: nApim + 100, y1: SV.BOX_Y + 42, x2: nIs - 90, y2: SV.BOX_Y + 42, 'stroke-width': 2.5 };
+      s.kmNew = el('line', { ...km, stroke: C.muted }, layerLinks);
+      s.kmPending = el('line', { ...km, stroke: C.grey, 'stroke-dasharray': '5 5' }, layerLinks);
+    }
+    s.apimDbs = apimDbs;
+    s.isDbs = isDbs;
+
+    // Temporary machines for the migration tools (below the databases they use)
+    const midX = (dbs) => (dbs[0].cx + dbs[1].cx) / 2;
+    if (useTempNode(scn)) {
+      const ver = scn === 'twostep' ? VIA : TARGET;
+      const name = scn === 'twostep' && !isK8s() ? 'Temporary server' : 'Temporary VM';
+      s.tempApim = { layer: el('g', {}, layerTop) };
+      s.tempApim.box = sBox(s.tempApim.layer, midX(apimDbs), SV.TEMP_Y, 200, 64, name, `APIM ${ver}`, 'tmp', 'idle', true);
+      sLinks(s.tempApim.layer, s.tempApim.box, apimDbs, true, { 'stroke-dasharray': '5 4' })
+        .forEach((p) => s.tempApim.layer.insertBefore(p, s.tempApim.layer.firstChild));
+    }
+    if (hasIs() && isK8s()) {
+      s.tempIs = { layer: el('g', {}, layerTop) };
+      s.tempIs.box = sBox(s.tempIs.layer, midX(isDbs), SV.TEMP_Y, 180, 64, 'Temporary VM', `IS ${tgtIsVer}`, 'tmp', 'idle', true);
+      sLinks(s.tempIs.layer, s.tempIs.box, isDbs, true, { 'stroke-dasharray': '5 4' })
+        .forEach((p) => s.tempIs.layer.insertBefore(p, s.tempIs.layer.firstChild));
+    }
+
+    // Badges on the new panel, and the things that fly in
+    s.cfgBadge = badge(layerTop, SV.NEW_X + 130, 512, 280, '⚙ Your settings & customizations', GREEN());
+    s.passBadge = badge(layerTop, SV.NEW_X + 180, 512, 180, '✓ Tests passed', C.ok);
+    s.jar = jarIcon(layerTop, '', 'Migration tool (JAR file)');
+    s.doc = sqlDocIcon(layerTop, '');
+
+    // API call paths: users -> load balancer -> APIM -> backend
+    const lbOut = { src: SV.CX - 20, tgt: SV.CX + 20 };
+    s.lbPts = {
+      src: [[SV.CX, lbIn[1]], [lbOut.src, ly + lh], [lbOut.src, 140], [oApim, 140], [oApim, SV.BOX_Y]],
+      tgt: [[SV.CX, lbIn[1]], [lbOut.tgt, ly + lh], [lbOut.tgt, 140], [nApim, 140], [nApim, SV.BOX_Y]],
+    };
+    // Each setup's line to the backend runs down inside its own panel, along the inner edge,
+    // and drops into its own side of the backend box.
+    const ly2 = SV.BOX_Y + SV.BOX_H / 2, laneX = { src: SV.OLD_X + SV.PANEL_W - 18, tgt: SV.NEW_X + 18 };
+    s.lanePts = {
+      src: [[oApim + 100, ly2], [laneX.src, ly2], [laneX.src, SV.BE_Y]],
+      tgt: [[nApim - 100, ly2], [laneX.tgt, ly2], [laneX.tgt, SV.BE_Y]],
+    };
+    const line = (pts, color, extra = {}) => el('path', { d: toD(pts), fill: 'none', stroke: color, 'stroke-opacity': 0.6,
+      'stroke-width': 2.5, 'stroke-dasharray': '4 6', ...extra }, layerLinks);
+    s.linkSrc = line(s.lbPts.src.slice(1), BLUE());
+    s.linkTgt = line(s.lbPts.tgt.slice(1), GREEN(), { opacity: 0 });
+    s.laneSrc = line(s.lanePts.src, BLUE());
+    s.laneTgt = line(s.lanePts.tgt, GREEN(), { opacity: 0 });
+
+    // Legend
+    const lg = el('g', {}, layerBg);
+    let lx2 = 372;
+    const key = (draw, label) => { draw(lx2); txt(lg, lx2 + 20, SV.H - 18, label, { 'font-size': 12.5, fill: C.muted }); lx2 += 40 + label.length * 6.6; };
+    key((x) => el('circle', { cx: x + 6, cy: SV.H - 22, r: 5, fill: C.packet }, lg), 'API call');
+    key((x) => el('rect', { x, y: SV.H - 29, width: 13, height: 13, rx: 3, fill: BLUE() }, lg), 'Old version data');
+    if (scn === 'twostep') key((x) => el('rect', { x, y: SV.H - 29, width: 13, height: 13, rx: 3, fill: C.db }, lg), `${VIA} data (in between)`);
+    key((x) => el('rect', { x, y: SV.H - 29, width: 13, height: 13, rx: 3, fill: GREEN() }, lg), 'New version data');
+    key((x) => el('rect', { x, y: SV.H - 29, width: 13, height: 13, rx: 3, fill: 'none', stroke: C.fresh, 'stroke-dasharray': '3 2' }, lg), 'Empty test database');
+    key((x) => el('rect', { x, y: SV.H - 29, width: 13, height: 13, rx: 3, fill: C.warn }, lg), 'Migration running');
+
+    // Initial state
+    gsap.set([s.panelNew, ...s.tgtBoxes.map((b) => b.g), ...Object.values(s.db).map((d) => d.g), ...s.fresh.map((d) => d.g),
+      ...s.tgtLinks.apim, ...(s.tgtLinks.is || []), ...s.freshLinks, s.kmNew, s.kmPending, s.lbDown, s.freezeBadge,
+      s.rollbackBadge, s.cfgBadge, s.passBadge, s.tempApim && s.tempApim.layer, s.tempIs && s.tempIs.layer].filter(Boolean), { opacity: 0 });
+    gsap.set([s.jar, s.doc], { x: SV.W - 70, y: SV.H - 160, opacity: 0, scale: 0.8, transformOrigin: '0 0' });
+    gsap.set(s.lbArrow, { rotation: 40, svgOrigin: `${SV.CX} ${ly + 34}` });
+    return s;
+  }
+
+  function simpleRoutes(s) {
+    return {
+      toLB: s.clients.map(([x, y]) => polyline([[x + 12, y], s.lbIn])),
+      lbThrough: polyline([s.lbIn, [SV.CX, s.lbIn[1]]]),
+      toNode: { src: polyline(s.lbPts.src), tgt: polyline(s.lbPts.tgt) },
+      entry: { src: s.lbPts.src[4], tgt: s.lbPts.tgt[4] },
+      toBackend: { src: polyline(s.lanePts.src), tgt: polyline(s.lanePts.tgt) },
+      backendPort: { src: s.lanePts.src[2], tgt: s.lanePts.tgt[2] },
+      lbIn: s.lbIn,
+    };
+  }
+
+  // Fly an icon onto a box or database, then shrink it into it.
+  function flyInto(tl, icon, [cx, cy], w, h) {
+    tl.fromTo(icon, { opacity: 0, x: SV.W - 70, y: SV.H - 160, scale: 0.8 },
+      { opacity: 1, x: cx - w * 0.4, y: cy - h * 0.4, duration: 1.1, ease: 'power2.out' });
+    tl.to(icon, { opacity: 0, scale: 0.25, x: cx - w * 0.125, y: cy - h * 0.125, duration: 0.5, ease: 'power2.in' }, '+=0.5');
+  }
+  const boxCenter = (b) => [b.cx, b.y + b.h / 2];
+  const dbCenter = (d) => [d.cx, (d.top + d.bottom) / 2];
+
+  function buildSimpleTimeline(scn, mode, s, steps) {
+    const tl = gsap.timeline({ paused: true, onComplete: () => setPlayLabel() });
+    const both = KMDB === 'both', D = s.db;
+    const shown = new Set(); // target links already visible
+    const showLinks = (key, pos) => {
+      if (shown.has(key) || !s.tgtLinks[key]) return;
+      shown.add(key);
+      tl.to(s.tgtLinks[key], { opacity: 1, duration: 0.5 }, pos);
+    };
+    // Which databases change in each migration step, and how far ('via' = the 4.2.0 hop).
+    const two = scn === 'twostep';
+    const FILLS = {
+      ismig: isSplit() ? [[D.IsS, 'tgt', 1], [D.IsI, 'tgt', 1]]
+        : [[D.S, 'tgt', 0.5], both ? [D.A, 'tgt', 0.4] : [D.I, 'tgt', 1]],
+      apimig: [[D.S, two ? 'via' : 'tgt', 1], [D.A, two ? 'via' : 'tgt', 1]],
+      migrate: [[D.A, 'tgt', 1], [D.S, 'tgt', 1]],
+    };
+    // all databases changed by one step fill at the same time
+    const fills = (label) => { const at = tl.duration(); FILLS[label].forEach(([db, k, lv]) => fillTo(tl, db, k, lv, at)); };
+    // A migration tool (JAR) runs in a box: it turns amber while the databases fill up.
+    const runJar = (label, box, linkKey, after) => {
+      if (linkKey) showLinks(linkKey);
+      flyInto(tl, s.jar, boxCenter(box), 58, 70);
+      setBox(tl, box, 'work', 'mig', '-=0.2');
+      tl.addLabel(label + 'Run');
+      fills(label);
+      tl.addLabel(label + 'Done');
+      setBox(tl, box, after[0], after[1], '+=0.3');
+    };
+    const tempApim = s.tempApim && s.tempApim.box;
+    const apimRunner = () => (tempApim ? [tempApim, null, ['tmp', 'idle']] : [s.tgt.apim, 'apim', ['neuIdle', 'done']]);
+
+    const ACT = {
+      running: () => wait(tl, 4),
+      build: () => {
+        tl.to(s.panelNew, { opacity: 1, duration: 0.8 });
+        tl.fromTo(s.tgtBoxes.map((b) => b.g), { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.8, ease: 'power2.out', stagger: 0.15 }, '<0.2');
+        wait(tl);
+      },
+      fresh: () => {
+        tl.fromTo(s.cfgBadge, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' });
+        tl.to(s.fresh.map((d) => d.g), { opacity: 1, duration: 0.6, stagger: 0.15 }, '+=0.4');
+        tl.to(s.freshLinks, { opacity: 1, duration: 0.5 }, '<');
+        s.tgtBoxes.forEach((b, i) => setBox(tl, b, 'neu', 'test', i ? '<' : '+=0.2'));
+        if (s.kmNew) tl.to(s.kmNew, { opacity: 1, duration: 0.4 }, '<');
+        tl.addLabel('freshRun');
+        wait(tl, 2.4);
+        tl.to(s.cfgBadge, { opacity: 0, duration: 0.3 });
+        tl.fromTo(s.passBadge, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(2)' });
+        wait(tl, 1.4);
+        tl.addLabel('freshDone');
+        s.tgtBoxes.forEach((b, i) => setBox(tl, b, 'neuIdle', 'ready', i ? '<' : undefined));
+        tl.to([...s.freshLinks, s.kmNew].filter(Boolean), { opacity: 0, duration: 0.4 }, '+=0.2');
+        tl.to(s.fresh.map((d) => d.g), { opacity: 0, duration: 0.6 }, '<');
+        tl.to(s.passBadge, { opacity: 0, duration: 0.4 }, '<');
+        wait(tl, 1.5);
+      },
+      stop: () => {
+        tl.fromTo(s.lbDown, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.4 });
+        tl.to(s.lbRect, { attr: { stroke: C.bad }, duration: 0.4 }, '<');
+        s.srcBoxes.forEach((b, i) => setBox(tl, b, 'oldIdle', 'stopped', i ? '<' : '+=1.6'));
+        tl.to([s.linkSrc, s.laneSrc], { opacity: 0.15, duration: 0.5 }, '<');
+        wait(tl);
+      },
+      freeze: () => {
+        tl.fromTo(s.freezeBadge, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(2)' });
+        s.srcBoxes.forEach((b) => showStatus(tl, b, 'frozen', '<'));
+        wait(tl);
+      },
+      copy: () => {
+        pulse(tl, s.oldDbs);
+        s.copies.forEach(([db, dx], i) => tl.fromTo(db.g, { opacity: 0, x: dx },
+          { opacity: 1, x: 0, duration: 1.8, ease: 'power2.inOut' }, i ? '<0.25' : undefined));
+        wait(tl);
+      },
+      ismig: () => {
+        const t = s.tempIs && s.tempIs.box;
+        if (t) tl.to(s.tempIs.layer, { opacity: 1, duration: 0.8 });
+        runJar('ismig', t || s.tgt.is, t ? null : 'is', t ? ['tmp', 'idle'] : ['neuIdle', 'done']);
+        if (t) tl.to(s.tempIs.layer, { opacity: 0, duration: 0.7 }, '+=0.8');
+        wait(tl);
+      },
+      tempvm: () => { tl.to(s.tempApim.layer, { opacity: 1, duration: 0.8 }); wait(tl); },
+      tmp42: () => { tl.to(s.tempApim.layer, { opacity: 1, duration: 0.8 }); wait(tl); },
+      apimig: () => { const [b, k, after] = apimRunner(); runJar('apimig', b, k, after); wait(tl); },
+      removevm: () => { tl.to(s.tempApim.layer, { opacity: 0, duration: 0.7 }); wait(tl, 2.4); },
+      removetmp: () => { tl.to(s.tempApim.layer, { opacity: 0, duration: 0.7 }); wait(tl, 2.4); },
+      migrate: () => {
+        flyInto(tl, s.doc, dbCenter(D.A), 70, 86);
+        fills('migrate');
+        wait(tl);
+      },
+      connectkm: () => {
+        showLinks('apim');
+        showLinks('is', '<');
+        s.tgtBoxes.forEach((b, i) => setBox(tl, b, 'neu', 'run', i ? '<' : '+=0.2'));
+        tl.to(s.kmPending, { opacity: 1, duration: 0.5 }, '+=0.3');
+        wait(tl);
+      },
+      convert: () => {
+        s.tgtBoxes.forEach((b, i) => setBox(tl, b, 'neuIdle', 'done', i ? '<' : undefined));
+        flyInto(tl, s.doc, dbCenter(D.A), 70, 86);
+        pulse(tl, [D.A]);
+        tl.to(s.kmPending, { opacity: 0, duration: 0.4 }, '<');
+        tl.to(s.kmNew, { opacity: 1, duration: 0.6 }, '<');
+        wait(tl);
+      },
+      start: () => {
+        showLinks('apim');
+        showLinks('is', '<');
+        s.tgtBoxes.forEach((b, i) => setBox(tl, b, 'neu', 'live', i ? '<0.3' : '+=0.2'));
+        if (s.kmNew) tl.to(s.kmNew, { opacity: 1, duration: 0.4 }, '<');
+        tl.to(s.laneTgt, { opacity: 0.4, duration: 0.5 }, '<');
+        wait(tl);
+      },
+      switch: () => {
+        tl.to(s.linkTgt, { opacity: 1, duration: 0.5 });
+        tl.to(s.laneTgt, { opacity: 1, duration: 0.5 }, '<');
+        tl.to(s.lbArrow, { rotation: -40, svgOrigin: `${SV.CX} ${SV.LB[1] + 34}`, duration: 0.6, ease: 'back.out(2)' }, '<');
+        tl.to(s.lbRect, { attr: { stroke: GREEN() }, duration: 0.5 }, '<');
+        tl.to(mode === 'downtime' ? s.lbDown : s.freezeBadge, { opacity: 0, duration: 0.4 }, '<');
+        showStatus(tl, s.tgt.apim, 'serve', '+=0.4');
+        tl.to([s.linkSrc, s.laneSrc], { opacity: 0.15, duration: 0.6 }, '<');
+        s.srcBoxes.forEach((b, i) => setBox(tl, b, 'oldIdle', 'standby', i ? '<' : '+=1.2'));
+        tl.to(s.envSrc, { opacity: 0.55, duration: 1 }, '+=0.6');
+        tl.fromTo(s.rollbackBadge, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(2)' }, '+=0.2');
+        wait(tl, 4);
+      },
+    };
+    steps.forEach((st) => { tl.addLabel(st.label); ACT[st.label](); });
+    return tl;
+  }
+
   // ---------- app state & controls ----------
   let scn = 'script';
   let mode = 'freeze';
@@ -1462,6 +1995,7 @@
     capTitle.textContent = st.title;
     capText.innerHTML = st.text; // step texts are static strings defined above
     stepBtns.forEach((b, j) => b.classList.toggle('active', j === i));
+    if (S.renderSteps) S.renderSteps(i);
     if (nar.on) narStart(i);
   }
   let lastPanel = '';
@@ -1493,12 +2027,21 @@
     clearTraffic();
     narReset();
     if (tl) tl.kill();
-    S = buildScene(scn, mode);
-    R = buildRoutes(S);
-    tl = buildTimeline(scn, mode, S);
+    document.body.classList.toggle('simple', isSimple());
+    document.querySelectorAll('.views button').forEach((b) => b.classList.toggle('active', b.dataset.view === VIEW));
+    if (isSimple()) {
+      STEPS = simpleStepsFor(scn, mode);
+      S = buildSimpleScene(scn, mode);
+      R = simpleRoutes(S);
+      tl = buildSimpleTimeline(scn, mode, S, STEPS);
+    } else {
+      S = buildScene(scn, mode);
+      R = buildRoutes(S);
+      tl = buildTimeline(scn, mode, S);
+      STEPS = stepsFor(scn, mode);
+    }
     tl.timeScale(speed);
     tl.eventCallback('onUpdate', narHold);
-    STEPS = stepsFor(scn, mode);
     shownStep = -1;
     lastPanel = '';
     document.getElementById('title').textContent = `WSO2 API Manager migration: ${SRC} → ${TARGET}`;
@@ -1562,6 +2105,28 @@
     if (nar.on) narStart(currentStep());
     setPlayLabel();
   }
+  // Switch between the simple and the advanced view, staying on the same step.
+  const VIEW_KEY = 'migVisView';
+  function setView(v) {
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) { /* no storage */ }
+    if (v === VIEW) return;
+    VIEW = v;
+    if (!tl || playerEl.hidden) return;
+    const lab = STEPS[currentStep()].label, paused = !playing() || tl.progress() >= 1;
+    load(scn, mode);
+    // the simple view folds some steps into one: go to the same step, or the one it is part of
+    const j = STEPS.findIndex((st) => st.label === (SIMPLE_SKIP.includes(lab) && isSimple() ? 'apimig' : lab));
+    tl.seek(STEPS[Math.max(0, j)].label, false);
+    if (paused) tl.pause();
+    shownStep = -1;
+    lastPanel = '';
+    renderCaption();
+    renderPanel(now());
+    setPlayLabel();
+    syncUrl();
+  }
+  document.querySelectorAll('.views button').forEach((b) => { b.onclick = () => setView(b.dataset.view); });
+
   document.querySelectorAll('.theme-btn').forEach((b) => {
     b.onclick = () => setTheme(theme() === 'light' ? 'dark' : 'light', true);
   });
@@ -1831,17 +2396,18 @@
 
   function spawnRequest() {
     const i = Math.floor(Math.random() * CLIENTS.length);
-    addPacket(R.toLB[i], C.packet, 5, 230, () => {
+    const pr = S.simple ? 3.5 : 5; // smaller, more frequent calls in the simple view
+    addPacket(R.toLB[i], C.packet, pr, 230, () => {
       const target = now().route;
       if (!target) { // load balancer is in maintenance: reject
-        ripple(...LB_IN, C.bad, 16);
+        ripple(...(R.lbIn || LB_IN), C.bad, 16);
         return;
       }
-      addPacket(R.lbThrough, C.packet, 5, 230, () => {
-        addPacket(R.toNode[target], C.packet, 5, 230, () => {
-          ripple(...R.entry[target], target === 'src' ? C.old : C.neu);
+      addPacket(R.lbThrough, C.packet, pr, 230, () => {
+        addPacket(R.toNode[target], C.packet, pr, 230, () => {
+          ripple(...R.entry[target], S.simple ? (target === 'src' ? C.neu : C.ok) : target === 'src' ? C.old : C.neu);
           // the gateway forwards the call to the backend
-          addPacket(R.toBackend[target], C.packet, 5, 260, () => {
+          addPacket(R.toBackend[target], C.packet, pr, 260, () => {
             ripple(...R.backendPort[target], C.backend);
           });
         });
@@ -1869,7 +2435,9 @@
     accWrite += dt;
     accMig += dt;
     const st = now();
-    if (accReq > 0.42) { accReq = 0; spawnRequest(); }
+    if (accReq > (S.simple ? 0.22 : 0.42)) { accReq = 0; spawnRequest(); }
+    // the simple view shows API calls only
+    if (S.simple) accWrite = accTest = accMig = 0;
     if (accWrite > 1.5) {
       accWrite = 0;
       if (st.writes) {
@@ -1965,7 +2533,7 @@
 
   function syncUrl() {
     if (LOCK) return;
-    const q = new URLSearchParams({ src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, km: KM, kmdb: KMDB, downtime: mode === 'downtime' ? 'yes' : 'no' });
+    const q = new URLSearchParams({ src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, km: KM, kmdb: KMDB, downtime: mode === 'downtime' ? 'yes' : 'no', view: VIEW });
     history.replaceState(null, '', '?' + q);
   }
   function start(src, tgt, dep, plat, km, kmdb, downtime, opts = {}) {
@@ -1998,6 +2566,7 @@
     setRadio('downtime', mode === 'downtime' ? 'yes' : 'no');
     playerEl.hidden = true;
     setupEl.hidden = false;
+    document.body.classList.remove('simple');
     history.replaceState(null, '', location.pathname);
   };
 
@@ -2023,7 +2592,7 @@
     const who = window.prompt('Customer name to show on the page (optional):', '');
     if (who === null) return;
     const lock = { src: SRC, tgt: TARGET, dep: DEP, plat: PLAT, km: KM, kmdb: KMDB,
-      downtime: mode === 'downtime' ? 'yes' : 'no', customer: who.trim().slice(0, 80) };
+      downtime: mode === 'downtime' ? 'yes' : 'no', view: VIEW, customer: who.trim().slice(0, 80) };
     const html = await buildCustomerHtml(lock);
     const slug = (x) => x.toLowerCase().replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '');
     const name = ['apim-migration', SRC, 'to', TARGET, lock.customer && slug(lock.customer)].filter(Boolean).join('-') + '.html';
@@ -2338,6 +2907,11 @@
   // skips the setup screen.
   // ?step=N opens paused at the end of step N; ?at=<label> opens paused just after a timeline label.
   const qs = new URLSearchParams(location.search);
+  // Starting view: the exported file's, the URL's, or the one this browser used last.
+  let savedView = '';
+  try { savedView = localStorage.getItem(VIEW_KEY) || ''; } catch (e) { /* no storage */ }
+  const firstView = (LOCK && LOCK.view) || qs.get('view') || savedView;
+  VIEW = firstView === 'simple' ? 'simple' : 'advanced';
   if (LOCK) {
     // customer file: no setup screen, no export, no GIF or video
     document.getElementById('btnSetup').hidden = true;

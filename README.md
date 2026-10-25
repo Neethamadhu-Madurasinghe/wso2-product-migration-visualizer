@@ -30,6 +30,7 @@ You can also hand the result to a customer as a standalone HTML file, an animate
 
    The approach that will be used is shown under the form. Click **Show the migration ▶**.
 3. **Watch and control the animation:**
+   - **Simple / Advanced** switches between the simple picture for newcomers and the full-detail view (see [Simple view](#simple-view));
    - **Play / Pause, Prev / Next, Restart**, or click a step button to jump to that step;
    - **speed** 0.5×–2×;
    - **With downtime / Without downtime (freeze window)** switches between the two ways of running the migration at any time;
@@ -140,6 +141,23 @@ In the player, **⬇ Export for customer** downloads one standalone HTML file (a
 How it works: the page keeps a copy of its own source from load time (`PRISTINE`). The export inserts `window.MIGRATION_LOCK = {...}` before the main script and swaps the GSAP `<script src>` for the inlined library.
 
 Note for editing: the main inline script must never contain a literal closing script tag. Write it as `<\/script>`, or the browser ends the script block there.
+
+## Simple view
+
+**Simple** is a calmer version of the same migration for people new to it, for example to teach a migration in about ten minutes. **Advanced** is the full-detail view and is unchanged. Use the **Simple / Advanced** switch in the player header; the page stays on the same step. The choice is remembered per browser, is part of the URL (`&view=simple`) and is the starting view of an exported customer file.
+
+What is different in Simple:
+- **Blue-green colours.** The current setup is blue ("BLUE · CURRENT SETUP") and the new one green ("GREEN · NEW SETUP"), as in a blue-green deployment. The advanced view keeps its orange/blue colours.
+- **One box per product.** API Manager (and Identity Server when it is the Key Manager) is one box, even for distributed deployments. A filled box is running, an outlined box is stopped, an amber box has a migration tool running in it.
+- **Databases change colour instead of showing rows.** Blue is old-version data, green is new-version data, and purple is the 4.2.0 hop in two-step migrations. A migration step fills the database from the bottom with the new colour, so a half-green database is half migrated. Empty test databases are dashed outlines.
+- **Only API calls move.** Users → load balancer → API Manager → backend. Each setup's line to the backend runs down inside its own panel, in the setup's colour, and the calls are small and frequent. Data changes and migration writes are not drawn; product–database and APIM–IS links are plain lines.
+- **Vertical layout.** Load balancer at the top, the current setup on the left, the new setup on the right, backend at the bottom.
+- **Fewer migration steps.** The SHARED_DB script and the two migration clients are one step, "Migrate identity and APIM data" (the identity and API Manager migrations run), drawn as a single JAR to keep the picture simple. With IS on the merged 4.2.0 path it is "Migrate API Manager data". From 4.2.0 on, the SQL script step is "Migrate the database schema" (only the schema changes). Steps are called *migrate*, never *upgrade*. Switching views goes to the matching step (Advanced's script or identity step → Simple's combined step).
+- **A step list instead of captions.** Done steps are ticked, the current step is larger with a one-sentence explanation, and the next steps are listed below. Click a step to jump to it. The step list is part of the picture, so it also appears in GIF and video exports.
+- **Fits the window.** No scrolling; the picture scales to the window (tested at 1280×720 to 1920×1080).
+- Narration reads the short step texts. Short titles and texts are in `simpleText()`.
+
+How it is built: `buildSimpleScene()` and `buildSimpleTimeline()` sit next to the advanced builders. The simple timeline is built from the same step list (`stepsFor()`) and adds the same labels (plus `freshRun`/`freshDone`), so step navigation, the downtime switch, narration and exports work for both views. `FILLS` in `buildSimpleTimeline()` says how far each migration step fills which database.
 
 ## Light and dark theme
 
