@@ -34,6 +34,7 @@ You can also hand the result to a customer as a standalone HTML file, an animate
    - **speed** 0.5×–2×;
    - **With downtime / Without downtime (freeze window)** switches between the two ways of running the migration at any time;
    - **🔊 Narrate** reads each step aloud (see [Narration](#narration));
+   - **☀ Light / 🌙 Dark** switches the theme (see [Light and dark theme](#light-and-dark-theme));
    - **Change setup** goes back to the setup screen.
 4. **Share it:**
    - **⬇ Export for customer** downloads one standalone HTML file with this setup locked in. The customer can play it, change the speed and switch downtime/freeze, but cannot change versions. It works offline. See [Customer deliverable](#customer-deliverable).
@@ -140,6 +141,15 @@ How it works: the page keeps a copy of its own source from load time (`PRISTINE`
 
 Note for editing: the main inline script must never contain a literal closing script tag. Write it as `<\/script>`, or the browser ends the script block there.
 
+## Light and dark theme
+
+The page has a dark theme and a light theme. The **☀ Light / 🌙 Dark** button is on the setup screen and in the player header.
+- The first time the page opens, it follows the OS setting (`prefers-color-scheme`). Once the viewer picks a theme, the choice is remembered in that browser (localStorage `migVisTheme`).
+- Switching while the animation plays keeps the current position and the play/pause state. The scene is rebuilt in the new colours and the narration is not restarted.
+- Exported customer files have the toggle too. They open in the customer's OS theme, not the theme used when exporting.
+- GIF and video exports use the theme that is active when you press the button.
+- All colours are CSS tokens on `:root` (dark) and `:root[data-theme="light"]`. The accent colours are darker in the light theme, and pills and badges get a lighter tint (`--tint`), so small status labels ("Running · changes frozen", "Testing use cases") keep at least about 5:1 contrast (WCAG asks for 4.5:1). The scene reads them through `readColors()` into `C` (and `K` for scene-only colours). When adding a colour, add a token to both blocks instead of a hex value in the script. The SQL document and JAR icons keep fixed colours, since they look the same in both themes.
+
 ## Narration
 
 **🔊 Narrate** (next to the speed selector) reads each step's caption aloud, so the viewer can watch the diagram instead of reading. It is off by default (browsers block speech until the viewer clicks) and is also in the exported customer file.
@@ -179,6 +189,7 @@ Shared by both:
 - Traffic packets run in a separate `requestAnimationFrame` loop (`frame()` → `tick(dt)`). The load balancer reads the timeline position to pick the target node, so seeking always gives the right traffic flow.
 - Editing tips:
   - Don't GSAP-scale SVG groups. It leaves matrix offsets that detach boxes from their connector lines. Use opacity plus a small y slide instead.
+  - Don't hard-code colours in the scene builders; use a CSS token in both theme blocks (see [Light and dark theme](#light-and-dark-theme)).
   - Captions and narration explain the migration process only. Version or architecture details that are there for accuracy go in the diagram.
 
 ## Options for later

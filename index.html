@@ -23,6 +23,58 @@
     --bad: #f87171;
     --packet: #ffd166;
     --backend: #2dd4bf;
+    --grey: #5b6684;     /* not started / switched off */
+    --text-2: #c3cbe0;   /* caption body text */
+    --accent-bg: #1b3152; --accent-line: #36598f;
+    --alt-bg: #2a2140; --alt-line: #5a4a8f;
+    --hover-line: #4a5a80;
+    --primary-bg: #26406b;
+    --glow: #17203a;     /* centre of the stage background gradient */
+    --region: #ffffff;   /* region fill, drawn at 1.5% opacity */
+    --shadow: #000000; --shadow-op: 0.35;
+    --tint: 1;          /* scales the coloured fill behind pills and badges */
+    --db-body: #221d45; --db-top: #3a3170;
+    --fresh-body: #3a1740; --fresh-top: #6b2a72;
+    --client: #2b3654;
+    --backend-row: #12302f;
+    --term-bg: #0a0e17; --term-text: #34d399;
+    color-scheme: dark;
+  }
+  /* Light theme. Accents are darker than in the dark theme so lines and labels stay readable on white. */
+  :root[data-theme="light"] {
+    --bg: #f4f6fa;
+    --panel: #ffffff;
+    --panel-2: #eef1f7;
+    --line: #cfd6e3;
+    --text: #1b2333;
+    --muted: #536079;
+    --old: #b03a0a;
+    --new: #1a56b0;
+    --db: #5b3cc4;
+    --fresh: #8e1a9c;
+    --is: #3f6212;
+    --db-row: #cfc5f7;
+    --ok: #06694a;
+    --warn: #7a4a00;
+    --bad: #b42318;
+    --packet: #f08c00;
+    --backend: #0b6560;
+    --grey: #9aa4b8;
+    --text-2: #3a4558;
+    --accent-bg: #e1ebfa; --accent-line: #94b5e3;
+    --alt-bg: #eee9fb; --alt-line: #c2b3ee;
+    --hover-line: #93a1bd;
+    --primary-bg: #d6e4f8;
+    --glow: #e4ebf7;
+    --region: #1b2333;
+    --shadow: #1b2333; --shadow-op: 0.12;
+    --tint: 0.5;        /* a lighter tint keeps pill and badge text readable */
+    --db-body: #f2eeff; --db-top: #ddd3ff;
+    --fresh-body: #fdeffe; --fresh-top: #f5cdf9;
+    --client: #d5dbe8;
+    --backend-row: #e0f3f0;
+    --term-bg: #0f1420; --term-text: #34d399;
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   body {
@@ -32,10 +84,13 @@
   .wrap { max-width: 1240px; margin: 0 auto; padding: 16px 16px 32px; }
   [hidden] { display: none !important; }
   .setup {
+    position: relative;
     max-width: 640px; margin: 48px auto; padding: 28px; background: var(--panel);
     border: 1px solid var(--line); border-radius: 16px;
   }
-  .setup h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+  .setup h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; padding-right: 110px; }
+  .setup .theme-btn { position: absolute; top: 20px; right: 20px; }
+  .theme-btn { white-space: nowrap; }
   .setup > p { margin: 0 0 22px; color: var(--muted); }
   .setup .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
   .setup label.field { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
@@ -48,7 +103,7 @@
   .setup .sub { margin: 4px 0 0 26px; padding-left: 12px; border-left: 2px solid var(--line); }
   .approach {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px 14px; margin: 0 0 20px; font-size: 14px; color: #c3cbe0;
+    padding: 12px 14px; margin: 0 0 20px; font-size: 14px; color: var(--text-2);
   }
   .approach strong { color: var(--text); }
   .approach.bad { border-color: var(--bad); }
@@ -56,9 +111,9 @@
   .setup button:disabled { opacity: 0.5; cursor: not-allowed; }
   .chip {
     display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 12px;
-    vertical-align: middle; background: #1b3152; border: 1px solid #36598f; color: var(--text); font-weight: 500;
+    vertical-align: middle; background: var(--accent-bg); border: 1px solid var(--accent-line); color: var(--text); font-weight: 500;
   }
-  .chip.alt { background: #2a2140; border-color: #5a4a8f; }
+  .chip.alt { background: var(--alt-bg); border-color: var(--alt-line); }
   .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .prepared { margin: 0 0 4px; color: var(--muted); font-size: 13px; letter-spacing: 0.3px; }
   @media (max-width: 640px) { .setup .row { grid-template-columns: 1fr; } .setup { margin: 16px auto; padding: 20px; } }
@@ -68,10 +123,10 @@
   .modes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .modes button { border: 0; border-radius: 0; padding: 8px 14px; background: var(--panel); color: var(--muted); }
   .modes button + button { border-left: 1px solid var(--line); }
-  .modes button.active { background: #1b3152; color: var(--text); }
+  .modes button.active { background: var(--accent-bg); color: var(--text); }
   .stage {
     position: relative;
-    background: radial-gradient(ellipse at 50% 0%, #17203a 0%, var(--bg) 70%);
+    background: radial-gradient(ellipse at 50% 0%, var(--glow) 0%, var(--bg) 70%);
     border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
   }
   svg { display: block; width: 100%; height: auto; }
@@ -81,22 +136,22 @@
   }
   .caption .num { color: var(--muted); font-size: 13px; white-space: nowrap; }
   .caption h2 { margin: 0; font-size: 18px; font-weight: 600; }
-  .caption p { grid-column: 2; margin: 0; color: #c3cbe0; max-width: 860px; }
+  .caption p { grid-column: 2; margin: 0; color: var(--text-2); max-width: 860px; }
   .caption code { white-space: nowrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 13px; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
   button, select {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
     border-radius: 8px; padding: 7px 12px; font: inherit; font-size: 14px; cursor: pointer;
   }
-  button:hover, select:hover { border-color: #4a5a80; }
-  button.primary { background: #26406b; border-color: #36598f; min-width: 92px; }
-  #btnNarrate[aria-pressed="true"] { background: #1b3152; border-color: var(--new); }
+  button:hover, select:hover { border-color: var(--hover-line); }
+  button.primary { background: var(--primary-bg); border-color: var(--accent-line); min-width: 92px; }
+  #btnNarrate[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--new); }
   #voice { max-width: 220px; }
   button:disabled, select:disabled { opacity: 0.45; cursor: default; }
   .gif-status {
     position: absolute; right: 14px; bottom: 14px; width: min(320px, calc(100% - 28px));
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-size: 13px;
   }
   .gif-status p { margin: 0 0 8px; }
   .gif-status .bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; margin-bottom: 10px; }
@@ -104,7 +159,7 @@
   .gif-status button { padding: 4px 10px; font-size: 13px; }
   .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
   .steps button { padding: 5px 10px; font-size: 13px; color: var(--muted); }
-  .steps button.active { color: var(--text); border-color: var(--new); background: #1b3152; }
+  .steps button.active { color: var(--text); border-color: var(--new); background: var(--accent-bg); }
   @media (max-width: 640px) {
     .caption { grid-template-columns: 1fr; }
     .caption p { grid-column: 1; }
@@ -115,6 +170,7 @@
 <body>
 <div class="wrap">
   <section id="setup" class="setup" hidden>
+    <button class="theme-btn" title="Switch between light and dark theme"></button>
     <h1>Plan an API Manager migration</h1>
     <p>Pick your versions and deployment to see how the migration works, step by step.</p>
     <div class="row">
@@ -172,6 +228,7 @@
         <button data-mode="downtime">With downtime</button>
         <button data-mode="freeze">Without downtime (freeze window)</button>
       </div>
+      <button class="theme-btn" title="Switch between light and dark theme"></button>
       <button id="btnSetup" title="Pick other versions or deployment">Change setup</button>
       <button id="btnExport" title="Download a standalone page for the customer with this setup locked">⬇ Export for customer</button>
     </div>
@@ -224,12 +281,41 @@
   // ---------- helpers ----------
   const NS = 'http://www.w3.org/2000/svg';
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-  const C = {
-    panel: css('--panel'), line: css('--line'), text: css('--text'), muted: css('--muted'),
-    old: css('--old'), neu: css('--new'), db: css('--db'), dbRow: css('--db-row'), fresh: css('--fresh'), is: css('--is'),
-    ok: css('--ok'), warn: css('--warn'), bad: css('--bad'), packet: css('--packet'),
-    backend: css('--backend'), grey: '#5b6684',
-  };
+  // Theme colours, read from the CSS tokens. readColors() runs again when the theme changes;
+  // the scene is then rebuilt, because the SVG and the timeline hold the colour values.
+  const C = {};
+  // Scene-only colours (not part of the GIF palette swatch).
+  const K = {};
+  function readColors() {
+    Object.assign(C, {
+      panel: css('--panel'), line: css('--line'), text: css('--text'), muted: css('--muted'),
+      old: css('--old'), neu: css('--new'), db: css('--db'), dbRow: css('--db-row'), fresh: css('--fresh'), is: css('--is'),
+      ok: css('--ok'), warn: css('--warn'), bad: css('--bad'), packet: css('--packet'),
+      backend: css('--backend'), grey: css('--grey'),
+    });
+    Object.assign(K, {
+      region: css('--region'), shadow: css('--shadow'), shadowOp: css('--shadow-op'), tint: Number(css('--tint')) || 1,
+      client: css('--client'), backendRow: css('--backend-row'), termBg: css('--term-bg'), termText: css('--term-text'),
+    });
+    DB_LOOK.real = { stroke: C.db, body: css('--db-body'), top: css('--db-top') };
+    DB_LOOK.fresh = { stroke: C.fresh, body: css('--fresh-body'), top: css('--fresh-top') };
+  }
+  const DB_LOOK = {};
+
+  // Light or dark. The viewer's choice is remembered per browser; until they choose, the OS setting is used.
+  const THEME_KEY = 'migVisTheme';
+  const themeMq = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
+  let savedTheme = '';
+  try { savedTheme = localStorage.getItem(THEME_KEY) || ''; } catch (e) { /* no storage */ }
+  const theme = () => document.documentElement.dataset.theme;
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    readColors();
+    document.querySelectorAll('.theme-btn').forEach((b) => {
+      b.textContent = t === 'light' ? '🌙 Dark' : '☀ Light';
+    });
+  }
+  applyTheme(savedTheme || (themeMq && themeMq.matches ? 'light' : 'dark'));
 
   // Chosen on the setup screen.
   let SRC = '4.2.0';
@@ -302,7 +388,7 @@
   }
   function pill(parent, x, y, w, label, color) {
     const g = el('g', {}, parent);
-    const r = el('rect', { x, y, width: w, height: 24, rx: 12, fill: color, 'fill-opacity': 0.15, stroke: color, 'stroke-opacity': 0.5 }, g);
+    const r = el('rect', { x, y, width: w, height: 24, rx: 12, fill: color, 'fill-opacity': 0.15 * K.tint, stroke: color, 'stroke-opacity': 0.5 }, g);
     const d = el('circle', { cx: x + 14, cy: y + 12, r: 4, fill: color }, g);
     const t = txt(g, x + 26, y + 16.5, label, { 'font-size': 12, fill: color });
     // set() lets the live status panel change a pill without the timeline.
@@ -631,7 +717,7 @@
 
   function region(parent, x, y, w, h, label, color) {
     const g = el('g', {}, parent);
-    el('rect', { x, y, width: w, height: h, rx: 18, fill: '#ffffff', 'fill-opacity': 0.015,
+    el('rect', { x, y, width: w, height: h, rx: 18, fill: K.region, 'fill-opacity': 0.015,
       stroke: color, 'stroke-opacity': 0.45, 'stroke-dasharray': '6 6' }, g);
     txt(g, x + 18, y + 26, label, { 'font-size': 12, fill: color, 'letter-spacing': 1.5, 'font-weight': 600 });
     return g;
@@ -672,10 +758,6 @@
   }
 
   const CYL = { w: 100, h: 100, ry: 12 };
-  const DB_LOOK = {
-    real: { stroke: C.db, body: '#221d45', top: '#3a3170' },
-    fresh: { stroke: C.fresh, body: '#3a1740', top: '#6b2a72' },
-  };
   function cylinder(parent, cx, y, name, schemaLabel, schemaAfter, look = DB_LOOK.real) {
     const { w, h, ry } = CYL, x = cx - w / 2;
     const g = el('g', {}, parent);
@@ -703,14 +785,14 @@
 
   function badge(parent, x, y, w, label, color) {
     const g = el('g', {}, parent);
-    el('rect', { x, y, width: w, height: 26, rx: 13, fill: color, 'fill-opacity': 0.18, stroke: color }, g);
+    el('rect', { x, y, width: w, height: 26, rx: 13, fill: color, 'fill-opacity': 0.18 * K.tint, stroke: color }, g);
     txt(g, x + w / 2, y + 17.5, label, { 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 600, fill: color });
     return g;
   }
   // Two-line variant of badge() for longer labels.
   function badge2(parent, x, y, w, lines, color) {
     const g = el('g', {}, parent);
-    el('rect', { x, y, width: w, height: 40, rx: 12, fill: color, 'fill-opacity': 0.18, stroke: color }, g);
+    el('rect', { x, y, width: w, height: 40, rx: 12, fill: color, 'fill-opacity': 0.18 * K.tint, stroke: color }, g);
     lines.forEach((l, i) => txt(g, x + w / 2, y + 16 + i * 15, l, { 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 600, fill: color }));
     return g;
   }
@@ -755,9 +837,9 @@
   function terminal(parent, [x, y], args, w = 250) {
     const lines = [].concat(args);
     const g = el('g', {}, parent);
-    el('rect', { x, y, width: w, height: 16 + lines.length * 14, rx: 6, fill: '#0a0e17', stroke: C.line }, g);
+    el('rect', { x, y, width: w, height: 16 + lines.length * 14, rx: 6, fill: K.termBg, stroke: C.line }, g);
     lines.forEach((line, i) => txt(g, x + 10, y + 19 + i * 14, line,
-      { 'font-size': 9.5, fill: C.ok, 'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace' }));
+      { 'font-size': 9.5, fill: K.termText, 'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace' }));
     return g;
   }
 
@@ -784,46 +866,52 @@
     return { gw, cp, tm, all: [gw, cp, tm] };
   }
 
-  const SRC_STATUS = {
-    aio: { run: ['Running · serving traffic', C.ok], frozen: ['Running · changes frozen', C.warn],
-      stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] },
-    gw: { run: ['Serving traffic', C.ok], stopped: ['Stopped', C.muted], standby: ['Standby', C.muted] },
-    cp: { run: ['Running', C.ok], frozen: ['Running · changes frozen', C.warn],
-      stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] },
-    tm: { run: ['Running', C.ok], stopped: ['Stopped', C.muted], standby: ['Standby', C.muted] },
-  };
-  const VM_STATUS = {
-    ready: ['All-in-one · migration only', C.muted], migId: ['Migrating identity data', C.warn],
-    migApim: ['Migrating API Manager data', C.warn], stepDone: ['Migration step done', C.muted],
-  };
-  const KM_STATES = {
-    kmSetup: ['Running · connecting IS as KM', C.ok], kmStop: ['Stopped · for KM conversion', C.muted] };
-  const IS_SRC_STATUS = { run: ['Running · Key Manager', C.ok], frozen: ['Running · changes frozen', C.warn],
-    stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] };
-  const IS_TGT_STATUS = { installed: ['Not started', C.muted], freshTest: ['Testing use cases', C.ok],
-    ready: ['Stopped · tested', C.muted], migIs: ['Migrating IS data', C.warn], stepDone: ['Stopped · migration done', C.muted],
-    kmSetup: ['Running · third-party KM', C.ok], kmStop: ['Stopped · for KM conversion', C.muted],
-    tested: ['Running · Key Manager', C.ok] };
-  const IS_VM_STATUS = { ready: ['All-in-one · migration only', C.muted], migIs: ['Migrating IS data', C.warn],
-    stepDone: ['Migration done', C.muted] };
-  const TGT_STATUS = {
-    aio: { installed: ['Installed · not started', C.muted], migId: ['Migrating identity data', C.warn],
-      migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · migration step done', C.muted],
-      tested: ['Running · tested, no traffic', C.ok], serving: ['Running · serving traffic', C.ok],
-      freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested, ready for data', C.muted], ...KM_STATES },
-    gw: { installed: ['Not started', C.muted], tested: ['Running · no traffic yet', C.ok], serving: ['Serving traffic', C.ok],
-      freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
-      kmSetup: ['Running', C.ok], kmStop: ['Stopped', C.muted] },
-    cp: { installed: ['Not started', C.muted], migId: ['Migrating identity data', C.warn],
-      migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · step done', C.muted],
-      tested: ['Running · tested', C.ok], freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
-      ...KM_STATES },
-    tm: { installed: ['Not started', C.muted], tested: ['Running', C.ok],
-      freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
-      kmSetup: ['Running', C.ok], kmStop: ['Stopped', C.muted] },
-  };
+  // Status labels per node. They hold colour values, so they are rebuilt with each scene
+  // (the theme can change between builds).
+  let SRC_STATUS, VM_STATUS, KM_STATES, IS_SRC_STATUS, IS_TGT_STATUS, IS_VM_STATUS, TGT_STATUS;
+  function buildStatusSets() {
+    SRC_STATUS = {
+      aio: { run: ['Running · serving traffic', C.ok], frozen: ['Running · changes frozen', C.warn],
+        stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] },
+      gw: { run: ['Serving traffic', C.ok], stopped: ['Stopped', C.muted], standby: ['Standby', C.muted] },
+      cp: { run: ['Running', C.ok], frozen: ['Running · changes frozen', C.warn],
+        stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] },
+      tm: { run: ['Running', C.ok], stopped: ['Stopped', C.muted], standby: ['Standby', C.muted] },
+    };
+    VM_STATUS = {
+      ready: ['All-in-one · migration only', C.muted], migId: ['Migrating identity data', C.warn],
+      migApim: ['Migrating API Manager data', C.warn], stepDone: ['Migration step done', C.muted],
+    };
+    KM_STATES = {
+      kmSetup: ['Running · connecting IS as KM', C.ok], kmStop: ['Stopped · for KM conversion', C.muted] };
+    IS_SRC_STATUS = { run: ['Running · Key Manager', C.ok], frozen: ['Running · changes frozen', C.warn],
+      stopped: ['Stopped · kept for rollback', C.muted], standby: ['Standby · rollback option', C.muted] };
+    IS_TGT_STATUS = { installed: ['Not started', C.muted], freshTest: ['Testing use cases', C.ok],
+      ready: ['Stopped · tested', C.muted], migIs: ['Migrating IS data', C.warn], stepDone: ['Stopped · migration done', C.muted],
+      kmSetup: ['Running · third-party KM', C.ok], kmStop: ['Stopped · for KM conversion', C.muted],
+      tested: ['Running · Key Manager', C.ok] };
+    IS_VM_STATUS = { ready: ['All-in-one · migration only', C.muted], migIs: ['Migrating IS data', C.warn],
+      stepDone: ['Migration done', C.muted] };
+    TGT_STATUS = {
+      aio: { installed: ['Installed · not started', C.muted], migId: ['Migrating identity data', C.warn],
+        migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · migration step done', C.muted],
+        tested: ['Running · tested, no traffic', C.ok], serving: ['Running · serving traffic', C.ok],
+        freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested, ready for data', C.muted], ...KM_STATES },
+      gw: { installed: ['Not started', C.muted], tested: ['Running · no traffic yet', C.ok], serving: ['Serving traffic', C.ok],
+        freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
+        kmSetup: ['Running', C.ok], kmStop: ['Stopped', C.muted] },
+      cp: { installed: ['Not started', C.muted], migId: ['Migrating identity data', C.warn],
+        migApim: ['Migrating API Manager data', C.warn], stepDone: ['Stopped · step done', C.muted],
+        tested: ['Running · tested', C.ok], freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
+        ...KM_STATES },
+      tm: { installed: ['Not started', C.muted], tested: ['Running', C.ok],
+        freshTest: ['Testing use cases · fresh DBs', C.ok], ready: ['Stopped · tested', C.muted],
+        kmSetup: ['Running', C.ok], kmStop: ['Stopped', C.muted] },
+    };
+  }
 
   function buildScene(scn, mode) {
+    buildStatusSets();
     const src = SRC;
     const G = GEO[DEP];
     // IS mode is wider; temporary VMs then sit in an extra row below the target environment.
@@ -834,7 +922,7 @@
     defs.innerHTML = `
       <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12"/></filter>
       <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/></filter>`;
+        <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="${K.shadow}" flood-opacity="${K.shadowOp}"/></filter>`;
     const layerBg = el('g', {}, svg);
     const layerLinks = el('g', {}, svg);
     const envSrc = el('g', {}, svg);
@@ -856,8 +944,8 @@
     // Clients
     CLIENTS.forEach(([x, y]) => {
       const g = el('g', {}, layerBg);
-      el('circle', { cx: x, cy: y - 9, r: 7, fill: '#2b3654', stroke: C.muted }, g);
-      el('path', { d: `M${x - 13},${y + 14} a13,11 0 0 1 26,0 z`, fill: '#2b3654', stroke: C.muted }, g);
+      el('circle', { cx: x, cy: y - 9, r: 7, fill: K.client, stroke: C.muted }, g);
+      el('path', { d: `M${x - 13},${y + 14} a13,11 0 0 1 26,0 z`, fill: K.client, stroke: C.muted }, g);
     });
     txt(layerBg, 78, 470, 'API clients', { 'text-anchor': 'middle', fill: C.muted, 'font-size': 13 });
 
@@ -878,7 +966,7 @@
     txt(be, bx + 20, 318, 'Backend services', { 'font-size': 14, 'font-weight': 600, fill: C.backend });
     txt(be, bx + 20, 336, 'your APIs’ real implementation', { 'font-size': 11, fill: C.muted });
     [350, 372, 394].forEach((y) => {
-      el('rect', { x: bx + 20, y, width: 170, height: 16, rx: 4, fill: '#12302f', stroke: C.backend, 'stroke-opacity': 0.5 }, be);
+      el('rect', { x: bx + 20, y, width: 170, height: 16, rx: 4, fill: K.backendRow, stroke: C.backend, 'stroke-opacity': 0.5 }, be);
       el('circle', { cx: bx + 30, cy: y + 8, r: 2.5, fill: C.backend }, be);
       el('circle', { cx: bx + 39, cy: y + 8, r: 2.5, fill: C.backend, 'fill-opacity': 0.5 }, be);
     });
@@ -1449,6 +1537,36 @@
       syncUrl();
     };
   });
+
+  // Switch light / dark. The SVG and the timeline hold colour values, so the scene is rebuilt
+  // and put back at the same point, playing or paused as before.
+  function setTheme(t, remember) {
+    if (remember) {
+      savedTheme = t;
+      try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* no storage */ }
+    }
+    if (t === theme()) return;
+    applyTheme(t);
+    if (!tl || playerEl.hidden) return;
+    const at = tl.time(), paused = !playing() || tl.progress() >= 1;
+    const narWasOn = nar.on;
+    nar.on = false; // don't restart the voice for a colour change
+    load(scn, mode);
+    tl.seek(at, false);
+    if (paused) tl.pause();
+    shownStep = -1;
+    lastPanel = '';
+    renderCaption();
+    renderPanel(now());
+    nar.on = narWasOn;
+    if (nar.on) narStart(currentStep());
+    setPlayLabel();
+  }
+  document.querySelectorAll('.theme-btn').forEach((b) => {
+    b.onclick = () => setTheme(theme() === 'light' ? 'dark' : 'light', true);
+  });
+  // Follow the OS setting until the viewer picks a theme.
+  themeMq?.addEventListener?.('change', (e) => { if (!savedTheme) setTheme(e.matches ? 'light' : 'dark', false); });
   btnPlay.onclick = () => {
     if (tl.progress() >= 1) { narReset(); shownStep = -1; tl.restart(); }
     else if (playing()) { tl.pause(); narPause(); }
@@ -1956,7 +2074,7 @@
     ctx.fillStyle = css('--bg');
     ctx.fillRect(0, 0, w, h);
     const g = ctx.createRadialGradient(w / 2, EXP_TOP, 0, w / 2, EXP_TOP, w * 0.7);
-    g.addColorStop(0, '#17203a');
+    g.addColorStop(0, css('--glow'));
     g.addColorStop(1, css('--bg'));
     ctx.fillStyle = g;
     ctx.fillRect(0, EXP_TOP, w, svgH);
@@ -2100,7 +2218,7 @@
       for (let p = 0, q = 0; p < px.length; p += 28, q += 4) keep.set(px.subarray(p, p + 4), q);
       samples.push(keep);
     }
-    const swatch = Object.values(C).concat([css('--bg'), css('--panel-2'), '#17203a', '#c3cbe0']);
+    const swatch = Object.values(C).concat([css('--bg'), css('--panel-2'), css('--glow'), css('--text-2')]);
     const sw = new Uint8Array(swatch.length * 4 * 400);
     swatch.forEach((hex, k) => {
       const n = parseInt(hex.replace('#', ''), 16);
